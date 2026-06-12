@@ -3,7 +3,7 @@
 Umbrella repo gom các thành phần qua **git submodules**. Clone kèm submodule:
 
 ```bash
-git clone --recurse-submodules git@github.com:john-naeder/K8sSecDaP.git
+git clone --recurse-submodules git@github.com:john-naeder/K8sSecDaP-BaocaoTN2.git
 # hoặc sau khi clone:
 make submodules
 ```
