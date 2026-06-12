@@ -1,0 +1,500 @@
+% ============================================================================
+% CHUONG: THIET KE VA CAI DAT
+% ============================================================================
+
+\chapter{THIẾT KẾ VÀ CÀI ĐẶT}
+\label{ch:impl}
+
+Chương này mô tả kiến trúc thư viện \texttt{libdsa} và các cài đặt cụ thể của ba thuật toán được phân tích ở chương trước: Count-Min Sketch, Misra--Gries và Hash Map chính xác. Trọng tâm là bố cục mô-đun cho phép thay thế thuật toán qua cấu hình, chi tiết bên trong của lớp \texttt{CountMinSketch} (lõi thuật toán chính), và kiểm thử đơn vị xác nhận các tính chất lý thuyết đã chứng minh ở Chương~\ref{ch:theory}.
+
+\section{Thiết kế tổng thể}
+
+\subsection{Strategy Pattern và giao diện \texttt{Estimator}}
+
+Ba thuật toán cùng giải Point Query nhưng có đặc tính khác nhau (chính xác vs xấp xỉ, thiên lệch trên vs dưới). Để cho phép chuyển đổi giữa các thuật toán mà không cần sửa mã nguồn ứng dụng, \texttt{libdsa} áp dụng mẫu thiết kế \textit{Strategy} \cite{gamma1995patterns}: một giao diện chung \texttt{Estimator} được hiện thực bởi các lớp cụ thể, ứng dụng chỉ làm việc với con trỏ tới giao diện.
+
+\begin{figure}[H]
+  \centering
+  \begin{tikzpicture}[
+    class/.style={draw, rectangle, rounded corners=1pt, minimum width=4cm, minimum height=1cm, font=\small},
+    abstract/.style={class, fill=blue!10, font=\small\itshape},
+    concrete/.style={class, fill=green!10},
+    inherit/.style={-{Stealth[length=2.5mm, width=2mm, open]}, thick},
+  ]
+    \node[abstract] (base) at (0, 0) {Estimator (abstract)};
+    \node[concrete] (cms)  at (-4.5, -2) {CountMinSketch};
+    \node[concrete] (hme)  at (0,    -2) {HashMapExact};
+    \node[concrete] (mg)   at (4.5,  -2) {HeavyHitters (MG)};
+
+    \draw[inherit] (cms.north) -- ++(0, 0.6) -| (base.south);
+    \draw[inherit] (hme.north) -- (base.south);
+    \draw[inherit] (mg.north)  -- ++(0, 0.6) -| (base.south);
+
+    \node[below=3pt of base, font=\scriptsize\itshape, fill=white, inner sep=1.5pt]
+      {record, estimate, reset, memory\_usage, name};
+  \end{tikzpicture}
+  \caption{Sơ đồ lớp Estimator.}
+  \label{fig:estimator-class}
+\end{figure}
+
+\noindent Chi tiết: Sơ đồ lớp \texttt{Estimator} và các hiện thực cụ thể trong \texttt{libdsa}.
+
+Về mặt ngôn ngữ, giao diện khai báo năm phương thức thuần ảo và hai tiện ích không ảo cho khóa \texttt{uint32\_t}. Trích từ \path{libdsa/include/dsa/frequency/estimator.h}:
+
+\begin{lstlisting}[language=C++, caption={Giao diện \texttt{Estimator}}, label=lst:estimator]
+class Estimator {
+public:
+    virtual ~Estimator() = default;
+    virtual void record(const void* key, size_t key_len) = 0;
+    virtual uint64_t estimate(const void* key, size_t key_len) const = 0;
+    virtual void reset() = 0;
+    virtual size_t memory_usage() const = 0;
+    virtual std::string name() const = 0;
+
+    // Tien ich cho IPv4 (uint32_t)
+    void record_u32(uint32_t key) { record(&key, sizeof(key)); }
+    uint64_t estimate_u32(uint32_t key) const { return estimate(&key, sizeof(key)); }
+};
+\end{lstlisting}
+
+Thiết kế sử dụng con trỏ \texttt{void*} và độ dài \texttt{key\_len} để khóa có thể là bất cứ kiểu nào có thể xếp tuần tự bộ nhớ: IPv4 (4 byte), IPv6 (16 byte), cặp $(\textit{src\_ip}, \textit{dst\_port})$ (6 byte), hoặc chuỗi ký tự. Điều này cho phép một hiện thực CMS duy nhất phục vụ nhiều bài toán mạng khác nhau mà không cần template hoặc đa hình tĩnh.
+
+\subsection{Registry và dòng dữ liệu pipeline}
+
+Để cấu hình chọn thuật toán qua file YAML (\texttt{pipeline.yaml}) mà không phải chỉnh sửa và biên dịch lại mã, \texttt{libdsa} cung cấp một \textit{Registry}: ánh xạ từ tên chuỗi (ví dụ \texttt{"count\_min\_sketch"}) tới hàm nhà máy tạo đối tượng tương ứng.
+
+\begin{lstlisting}[language=C++, caption={Sử dụng Registry trong cấu hình}, label=lst:registry]
+auto estimator = dsa::Registry<Estimator>::instance().create(config.algorithm);
+estimator->record_u32(src_ip);
+\end{lstlisting}
+
+Nhờ Registry, thay đổi thuật toán chỉ cần sửa một dòng YAML, không cần tái biên dịch. Đây là nền tảng cho việc thử nghiệm A/B giữa CMS và HashMap Exact khi đánh giá hệ thống. Đặt Registry vào toàn cảnh, Hình~\ref{fig:pipeline-flow} minh họa dòng dữ liệu từ gói mạng đến truy vấn tần suất, gồm bốn khối tách biệt trách nhiệm: thu thập (collector), chuẩn hoá (normalizer), ước lượng (estimator qua Registry) và truy vấn (query API).
+
+\begin{figure}[H]
+  \centering
+  \begin{tikzpicture}[
+    node distance=0.8cm and 0.6cm,
+    box/.style={draw, rectangle, rounded corners=2pt, minimum width=3cm, minimum height=1cm, align=center, font=\small},
+    src/.style={box, fill=red!10},
+    proc/.style={box, fill=blue!10},
+    store/.style={box, fill=green!10},
+    api/.style={box, fill=orange!15},
+    flow/.style={-{Stealth[length=2.5mm]}, thick},
+    config/.style={draw, rectangle, dashed, minimum width=2.6cm, minimum height=0.7cm, fill=yellow!15, font=\scriptsize\ttfamily},
+  ]
+    \node[src] (pkt) {Gói mạng\\(eBPF/pcap)};
+    \node[proc, right=of pkt] (norm) {Normalizer\\(trích src\_ip,\\dst\_port)};
+    \node[proc, right=of norm] (reg)  {Registry\\\texttt{create(name)}};
+    \node[store, right=of reg] (est)  {Estimator\\\texttt{record(key)}};
+    \node[api, below=1.4cm of est] (query) {Query API\\\texttt{estimate(key)}};
+    \node[api, left=of query] (alert) {Alert Engine\\(ngưỡng $\tau$)};
+
+    \node[config, above=0.3cm of reg] (cfg) {pipeline.yaml};
+    \draw[flow, dashed] (cfg.south) -- (reg.north);
+
+    \draw[flow] (pkt)  -- (norm);
+    \draw[flow] (norm) -- (reg);
+    \draw[flow] (reg)  -- (est);
+    \draw[flow] (est.south)  -- (query.north);
+    \draw[flow] (query) -- (alert);
+  \end{tikzpicture}
+  \caption{Dòng dữ liệu pipeline.}
+  \label{fig:pipeline-flow}
+\end{figure}
+
+\noindent Chi tiết: Dòng dữ liệu trong pipeline \texttt{libdsa}: cấu hình YAML chọn thuật toán qua Registry; Estimator phục vụ cả record (từ Normalizer) lẫn estimate (cho Alert Engine). Alert Engine so sánh $\hat f_x$ với ngưỡng $\tau$ do nhà điều hành đặt.
+
+\section{Cài đặt Count-Min Sketch}
+
+\subsection{Cấu trúc dữ liệu nội bộ}
+
+Lớp \texttt{CountMinSketch} duy trì ma trận đếm là \path{std::vector<std::vector<uint64_t>>} và mảng seed cho các hàm băm:
+
+\begin{lstlisting}[language=C++, caption={Các trường nội bộ của \texttt{CountMinSketch}}, label=lst:cms-fields]
+class CountMinSketch : public Estimator {
+    uint32_t width_;
+    uint32_t depth_;
+    std::vector<std::vector<uint64_t>> table_;  // d hang x w cot
+    std::vector<uint32_t> seeds_;               // d seed cho MurmurHash3
+public:
+    CountMinSketch(uint32_t width = 2048, uint32_t depth = 5);
+    // ...
+};
+\end{lstlisting}
+
+Mặc định $w = 2048$ và $d = 5$ tương ứng với $\varepsilon \approx e/w \approx 1{,}33 \times 10^{-3}$ và $\delta \approx e^{-d} \approx 6{,}7 \times 10^{-3}$. Tổng bộ nhớ: $w \times d \times 8$ byte $= 80$ KB, phù hợp với L2 cache và cho tốc độ truy cập cao.
+
+\paragraph{Layout bộ nhớ.} Hình~\ref{fig:cms-memory-layout} minh hoạ cách ma trận $d \times w$ nằm trong bộ nhớ. Mỗi hàng là một \texttt{std::vector<uint64\_t>} cấp phát liên tiếp, do đó các ô trong một hàng nằm kề nhau theo địa chỉ --- đảm bảo phép truy cập $M[i][h_i(x)]$ hit L1/L2 cache khi $w \le 2^{13}$ (64 KB / 8 byte).
+
+\begin{figure}[H]
+  \centering
+  \begin{tikzpicture}[
+    cell/.style={draw, minimum width=0.75cm, minimum height=0.6cm, font=\scriptsize, anchor=center},
+    rowlabel/.style={font=\scriptsize\ttfamily},
+    brace/.style={decorate, decoration={brace, amplitude=5pt}, thick},
+  ]
+    \foreach \r in {0,1,2,3,4} {
+      \foreach \c in {0,1,2,3,4,5,6,7} {
+        \node[cell] (m\r\c) at (\c*0.75, -\r*0.6) {};
+      }
+    }
+    \node[rowlabel, left=4pt of m00] {hàng 0};
+    \node[rowlabel, left=4pt of m10] {hàng 1};
+    \node[rowlabel, left=4pt of m20] {hàng 2};
+    \node[rowlabel, left=4pt of m30] {hàng 3};
+    \node[rowlabel, left=4pt of m40] {hàng 4};
+
+    % Chỉ báo w ô (phía trên)
+    \draw[brace] ($(m00.north west) + (0,0.1)$) -- ($(m07.north east) + (0,0.1)$)
+      node[midway, above=6pt, font=\small] {$w$ ô (minh hoạ $w{=}8$; thực tế $w{=}2048$)};
+
+    % Chi bao cache line tren hang 0
+    \node[draw, rectangle, very thick, red, fit=(m00)(m07), inner sep=0.5pt] {};
+    \node[right=0.5cm of m07, font=\scriptsize, align=left]
+         (cacheLabel) {cache-line liên tục\\ $8 \times 8$\,byte $= 64$\,B};
+
+    % Brace "d=5" dat ben phai ma tran, duoi phan cache label, khong dung nhan hang
+    \draw[brace] ($(m07.north east) + (0.2,0.1)$) -- ($(m47.south east) + (0.2,-0.1)$)
+      node[midway, right=7pt, font=\small] {$d = 5$};
+
+    % Seeds — dat thap hon va xa phai de khong de len bat cu gi
+    \node[right=3.5cm of m47, font=\scriptsize, align=left]
+      {\textbf{seeds:}\\
+       \texttt{0x9e3779b9},\\
+       \texttt{0xb5b4db70},\\
+       \texttt{0xcd357227},\\
+       \texttt{0xe4b2098e},\\
+       \texttt{0xfb2e80f5}};
+  \end{tikzpicture}
+  \caption{Layout bộ nhớ của Count-Min Sketch.}
+  \label{fig:cms-memory-layout}
+\end{figure}
+
+\noindent Chi tiết: Mỗi hàng là vùng liên tục $w \cdot 8$ byte; tổng cộng $d$ hàng. Một khối chữ nhật đỏ minh hoạ một cache-line 64 byte. Vì \texttt{UPDATE} chỉ chạm một ô trên mỗi hàng, chi phí truy xuất bộ nhớ thực tế là $d$ lần truy cập ngẫu nhiên — mỗi lần thường hit cache nếu hàng vừa trong L1/L2.
+
+Hàm khởi tạo sinh $d$ seed theo hệ số vàng (\textit{golden ratio}) để đảm bảo các hàm băm độc lập lẫn nhau:
+
+\begin{lstlisting}[language=C++, caption={Khởi tạo seed cho hàm băm}, label=lst:cms-init]
+CountMinSketch::CountMinSketch(uint32_t width, uint32_t depth)
+    : width_(width), depth_(depth),
+      table_(depth, std::vector<uint64_t>(width, 0)) {
+    seeds_.reserve(depth);
+    for (uint32_t i = 0; i < depth; ++i) {
+        seeds_.push_back(0x9e3779b9 + i * 0x517cc1b7);
+    }
+}
+\end{lstlisting}
+
+Hằng số \texttt{0x9e3779b9} là nghịch đảo của tỉ lệ vàng nhân với $2^{32}$, thường được dùng để ``rải'' các seed trên toàn không gian 32-bit. Giá trị \texttt{0x517cc1b7} là một số nguyên tố lớn tạo độ lệch đều giữa các seed.
+
+\subsection{Hàm băm MurmurHash3}
+
+Hàm \texttt{hash()} là biến thể của MurmurHash3 \cite{appleby2011murmur}, xử lý khóa theo khối 4 byte với các phép nhân--xoay--xor (bit mixing) và một giai đoạn hoàn tất (\textit{finalization}) đảm bảo tính \textit{avalanche}. Trích từ \texttt{count\_min\_sketch.cpp:19--60}:
+
+\begin{lstlisting}[language=C++, caption={Lõi MurmurHash3 cho khóa bất kỳ}, label=lst:murmur]
+uint32_t CountMinSketch::hash(const void* key, size_t key_len, uint32_t seed) const {
+    const uint8_t* data = static_cast<const uint8_t*>(key);
+    uint32_t h = seed;
+    size_t nblocks = key_len / 4;
+    for (size_t i = 0; i < nblocks; ++i) {
+        uint32_t k;
+        std::memcpy(&k, data + i * 4, 4);
+        k *= 0xcc9e2d51;
+        k = (k << 15) | (k >> 17);   // xoay trai 15
+        k *= 0x1b873593;
+        h ^= k;
+        h = (h << 13) | (h >> 19);    // xoay trai 13
+        h = h * 5 + 0xe6546b64;
+    }
+    // ... (xu ly byte du va hoan tat)
+    return h;
+}
+\end{lstlisting}
+
+Ba giai đoạn then chốt:
+\begin{itemize}
+  \item \textbf{Block mixing:} mỗi khối 4 byte được nhân với hai số nguyên tố lớn và xoay bit, đảm bảo mỗi bit đầu vào ảnh hưởng đến nhiều bit đầu ra.
+  \item \textbf{Tail handling:} các byte thừa (0--3 byte cuối) được xử lý riêng bằng fallthrough \texttt{switch}.
+  \item \textbf{Finalization:} các phép xor-shift và nhân cuối cùng loại bỏ tương quan còn sót lại, đạt tính chất avalanche (thay đổi 1 bit đầu vào → trung bình 16 bit đầu ra thay đổi).
+\end{itemize}
+
+\subsection{Thao tác \texttt{record()} và \texttt{estimate()}}
+
+Hai thao tác chính đi thẳng vào lõi thuật toán CMS:
+
+\begin{lstlisting}[language=C++, caption={UPDATE và QUERY trong CMS}, label=lst:cms-core]
+void CountMinSketch::record(const void* key, size_t key_len) {
+    for (uint32_t i = 0; i < depth_; ++i) {
+        uint32_t col = hash(key, key_len, seeds_[i]) % width_;
+        table_[i][col]++;
+    }
+}
+
+uint64_t CountMinSketch::estimate(const void* key, size_t key_len) const {
+    uint64_t min_val = std::numeric_limits<uint64_t>::max();
+    for (uint32_t i = 0; i < depth_; ++i) {
+        uint32_t col = hash(key, key_len, seeds_[i]) % width_;
+        min_val = std::min(min_val, table_[i][col]);
+    }
+    return min_val;
+}
+\end{lstlisting}
+
+\texttt{record()} tăng đúng $d$ ô trong ma trận, mỗi ô nằm ở một hàng. \texttt{estimate()} lấy min của $d$ ô tương ứng. Độ phức tạp thời gian cho cả hai là $O(d)$, không phụ thuộc $m$ hay $n$.
+
+\section{Cài đặt Misra-Gries}
+
+Lớp \texttt{HeavyHitters} sử dụng \path{std::unordered_map<std::string, uint64_t>} với dung lượng tối đa $k$. Logic ba nhánh của \texttt{record()} ánh xạ trực tiếp với Giải thuật~\ref{alg:misra-gries}:
+
+\begin{lstlisting}[language=C++, caption={UPDATE trong Misra-Gries}, label=lst:mg-core]
+void HeavyHitters::record(const void* key, size_t key_len) {
+    std::string s(static_cast<const char*>(key), key_len);
+    ++n_;
+
+    auto it = counters_.find(s);
+    if (it != counters_.end()) {
+        ++it->second;                       // Nhanh 1: da co -> tang
+        return;
+    }
+    if (counters_.size() + 1 < k_) {
+        counters_.emplace(std::move(s), 1); // Nhanh 2: chua day -> them moi
+        return;
+    }
+    // Nhanh 3: day -> giam tat ca, xoa counter ve 0
+    for (auto cur = counters_.begin(); cur != counters_.end();) {
+        if (--cur->second == 0) {
+            cur = counters_.erase(cur);
+        } else {
+            ++cur;
+        }
+    }
+}
+\end{lstlisting}
+
+Nhánh 3 là trường hợp worst-case $O(k)$ do phải duyệt toàn bộ bảng. Tuy nhiên trong phân tích amortized, chi phí trung bình mỗi thao tác vẫn là $O(1)$ vì mỗi lần nhánh 3 xảy ra phải được trả bằng $k$ lần nạp phần tử mới trước đó.
+
+\section{Cài đặt HashMap Exact (baseline)}
+
+Lớp \texttt{HashMapExact} đơn giản là bọc \path{std::unordered_map<std::string, uint64_t>} để so sánh. Mã gần như tầm thường: \texttt{record()} tăng \texttt{counters\_[key]}; \texttt{estimate()} trả về giá trị nếu tồn tại, $0$ nếu không. Tham chiếu: \path{libdsa/src/frequency/hash_map_exact.cpp}.
+
+\section{Kiểm thử đơn vị}
+
+Bộ kiểm thử \texttt{test\_count\_min\_sketch.cpp} gồm 8 test case dùng khung Google Test, xác nhận các tính chất lý thuyết đã chứng minh ở Chương~\ref{ch:theory}.
+
+\subsection{Các test case cốt lõi}
+
+Ba test case trọng yếu bám sát ba kết luận lý thuyết: tính chất ước lượng thừa (phần (a) của Định lý~\ref{thm:cms}), biên sai số $(\varepsilon, \delta)$ (phần (b)), và dấu chân bộ nhớ cam kết. Tính chất (a) --- \textit{không bao giờ ước lượng thiếu} --- được kiểm tra trực tiếp bằng cách chèn 10\,000 khóa khác nhau rồi xác minh mọi truy vấn đều trả về $\ge 1$:
+
+\begin{lstlisting}[language=C++, caption={Xác nhận overestimate property}, label=lst:test-overest]
+TEST(CountMinSketch, OverestimateProperty) {
+    CountMinSketch cms(2048, 5);
+    for (uint32_t i = 0; i < 10000; ++i) {
+        cms.record(&i, sizeof(i));
+    }
+    for (uint32_t i = 0; i < 100; ++i) {
+        EXPECT_GE(cms.estimate(&i, sizeof(i)), 1u);
+    }
+}
+\end{lstlisting}
+
+Tính chất (b) --- \textit{sai số không vượt quá $\varepsilon m$ với xác suất cao} --- được kiểm tra bằng việc chèn một khóa cố định 500 lần, sau đó chèn thêm $\sim 10^5$ khóa khác nhau, và xác minh estimate nằm trong biên $[500, 500 + \varepsilon m]$ (biên rộng 700 để phủ các dao động thống kê):
+
+\begin{lstlisting}[language=C++, caption={Xác nhận biên $(\varepsilon, \delta)$}, label=lst:test-bound]
+TEST(CountMinSketch, AccuracyBound) {
+    // w=2048, d=5 -> eps ~ e/w ~ 0.00133
+    CountMinSketch cms(2048, 5);
+    const uint32_t m = 100000;
+    uint32_t target = 0;
+    for (uint32_t i = 0; i < 500; ++i) cms.record(&target, sizeof(target));
+    for (uint32_t i = 1; i < m - 500 + 1; ++i) cms.record(&i, sizeof(i));
+
+    uint64_t est = cms.estimate(&target, sizeof(target));
+    EXPECT_GE(est, 500u);
+    // eps * m ~ 0.00133 * 100000 ~ 133 -> cho phep bien rong 700
+    EXPECT_LE(est, 700u);
+}
+\end{lstlisting}
+
+Cuối cùng, test bộ nhớ xác minh cam kết của lớp: ma trận $w \times d$ của \texttt{uint64\_t} phải chiếm ít nhất $2048 \times 5 \times 8 = 81\,920$ byte:
+
+\begin{lstlisting}[language=C++, caption={Xác nhận memory usage}, label=lst:test-mem]
+TEST(CountMinSketch, MemoryUsage) {
+    CountMinSketch cms(2048, 5);
+    EXPECT_GE(cms.memory_usage(), 2048u * 5 * 8);
+}
+\end{lstlisting}
+
+\subsection{Kết quả tổng thể}
+
+\begin{table}[H]
+  \centering
+  \caption{Kết quả kiểm thử đơn vị \texttt{libdsa} (ctest).}
+  \label{tab:ctest-results}
+  \begin{tabular}{@{}l c c c@{}}
+    \toprule
+    \textbf{Module} & \textbf{Test cases} & \textbf{Pass} & \textbf{Thời gian} \\
+    \midrule
+    \texttt{count\_min\_sketch} & 8  & 8  & 0{,}02 s \\
+    \texttt{heavy\_hitters}     & 6  & 6  & 0{,}01 s \\
+    \texttt{hash\_map\_exact}   & 5  & 5  & 0{,}01 s \\
+    \texttt{registry}           & 4  & 4  & 0{,}00 s \\
+    \midrule
+    \textbf{Tổng}               & 23 & 23 & 0{,}04 s \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+Toàn bộ test case xanh (\texttt{100\% tests passed, 0 tests failed out of 23}), khẳng định cả ba hiện thực hoạt động đúng theo đặc tả lý thuyết.
+
+\section{Kết quả benchmark thực tế}
+\label{sec:impl-bench}
+
+Bộ benchmark \path{libdsa/benchmarks/bench_frequency.cpp} dùng Google Benchmark sinh luồng $10^6$ khóa \texttt{uint32\_t} từ \texttt{std::mt19937} với seed cố định 42 để đảm bảo tái lập. Dữ liệu thô được ghi ở \texttt{output/bench/\{throughput,error\_rate\}.csv}; mã tái tạo: \verb|cmake --build build --target run_benchmarks|.
+
+\subsection{Thông lượng}
+
+Bảng~\ref{tab:bench-throughput} so sánh thông lượng \texttt{record()} và \texttt{estimate()} giữa CMS (nhiều cấu hình $w$) và Hash Map chính xác. Đơn vị: triệu phép/giây (Mops).
+
+\begin{table}[H]
+  \centering
+  \caption{Thông lượng và bộ nhớ (Mops, KB).}
+  \label{tab:bench-throughput}
+  \small
+  \begin{tabular}{@{}l r r r@{}}
+    \toprule
+    \textbf{Cấu hình}        & \textbf{$w$} & \textbf{Mops} & \textbf{Bộ nhớ (KB)} \\
+    \midrule
+    CMS record ($d=5$)       & 512   & 11{,}83 & 20{,}0 \\
+    CMS record ($d=5$)       & 1024  & 11{,}82 & 40{,}0 \\
+    CMS record ($d=5$)       & 2048  & 12{,}00 & 80{,}0 \\
+    CMS record ($d=5$)       & 4096  & 11{,}53 & 160{,}0 \\
+    CMS estimate ($d=5$)     & 2048  &  8{,}87 & --- \\
+    HashMap record           & ---   &  5{,}38 & 3\,808 \\
+    HashMap estimate         & ---   &  4{,}45 & --- \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\noindent Nguồn: \texttt{output/bench/throughput.csv}.
+
+Hai quan sát quan trọng: (i) thông lượng CMS gần như hằng số khi $w$ tăng từ $512$ lên $4096$ --- điều này khớp với phân tích layout bộ nhớ (Hình~\ref{fig:cms-memory-layout}): chừng nào $w \cdot d \cdot 8$ còn vừa trong L2 ($\le 256$ KB) thì truy cập ngẫu nhiên vẫn hit cache; (ii) CMS nhanh hơn HashMap $\approx 2{,}2$ lần và tiết kiệm $\approx 47\times$ bộ nhớ tại $w = 2048$.
+
+Biểu đồ Hình~\ref{fig:bench-throughput} trực quan hoá cùng dữ liệu.
+
+\begin{figure}[H]
+  \centering
+  \begin{tikzpicture}
+    \begin{axis}[
+      width=10.5cm, height=6cm,
+      ybar,
+      bar width=15pt,
+      enlarge x limits=0.2,
+      ylabel={Thông lượng (Mops)},
+      ymin=0, ymax=14,
+      symbolic x coords={CMS-512,CMS-1024,CMS-2048,CMS-4096,HashMap},
+      xtick=data,
+      nodes near coords,
+      nodes near coords style={font=\scriptsize},
+      x tick label style={font=\small, rotate=20, anchor=east},
+      ymajorgrids=true,
+      grid style=dashed,
+    ]
+    \addplot[fill=blue!30] coordinates {
+      (CMS-512, 11.83)
+      (CMS-1024, 11.82)
+      (CMS-2048, 12.00)
+      (CMS-4096, 11.53)
+      (HashMap, 5.38)
+    };
+    \end{axis}
+  \end{tikzpicture}
+  \caption{Thông lượng \texttt{record()} (CMS vs HashMap).}
+  \label{fig:bench-throughput}
+\end{figure}
+
+\noindent Chi tiết: Thông lượng \texttt{record()} của CMS ở các cấu hình $w$ đã đo; HashMap bị giới hạn bởi chi phí cấp phát bucket và đụng độ chuỗi khoá.
+
+\subsection{Sai số thực tế theo \texorpdfstring{$\varepsilon$}{epsilon}}
+
+Bảng~\ref{tab:bench-error} cho thấy sai số đo được \textit{thấp hơn} nhiều so với cận lý thuyết $\varepsilon \cdot m$, xác nhận rằng biên trong Định lý~\ref{thm:cms} là \textit{cận trên lỏng} trên phân phối đều. Với luồng Zipfian thực tế, sai số thường giảm thêm $2$--$5\times$ nhờ Conservative Update.
+
+\begin{table}[H]
+  \centering
+  \caption{Sai số thực tế (overcount trung bình).}
+  \label{tab:bench-error}
+  \small
+  \begin{tabular}{@{}r r r r r@{}}
+    \toprule
+    \textbf{$w$} & \textbf{$\varepsilon = e/w$} & \textbf{Cận LT $\varepsilon m$} & \textbf{Overcount đo được} & \textbf{Tỉ lệ thực/LT} \\
+    \midrule
+     256  & $0{,}01062$  & $10\,620$ & $368{,}3$ & $3{,}5\%$ \\
+     512  & $0{,}00531$  & $5\,310$  & $179{,}4$ & $3{,}4\%$ \\
+    1024  & $0{,}00265$  & $2\,650$  & $86{,}2$  & $3{,}3\%$ \\
+    2048  & $0{,}00133$  & $1\,330$  & $40{,}8$  & $3{,}1\%$ \\
+    4096  & $0{,}00066$  & $660$     & $18{,}8$  & $2{,}8\%$ \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\noindent Nguồn: \texttt{output/bench/error\_rate.csv}.
+
+\begin{figure}[H]
+  \centering
+  \begin{tikzpicture}
+    \begin{loglogaxis}[
+      width=10cm, height=6.2cm,
+      xlabel={Chiều rộng $w$},
+      ylabel={Sai số trung bình (overcount)},
+      legend pos=north east,
+      grid=both,
+      grid style=dashed,
+      xtick={256,512,1024,2048,4096},
+      xticklabels={256,512,1024,2048,4096},
+    ]
+    \addplot[thick, mark=*, blue] coordinates {
+      (256, 368.338) (512, 179.352) (1024, 86.192) (2048, 40.799) (4096, 18.759)
+    };
+    \addlegendentry{Đo được (libdsa)}
+    \addplot[thick, mark=square, red, dashed] coordinates {
+      (256, 10620) (512, 5310) (1024, 2650) (2048, 1330) (4096, 660)
+    };
+    \addlegendentry{Cận lý thuyết $\varepsilon m$}
+    \end{loglogaxis}
+  \end{tikzpicture}
+  \caption{Sai số thực tế theo $w$.}
+  \label{fig:bench-error}
+\end{figure}
+
+\noindent Chi tiết: Sai số thực tế giảm xấp xỉ tuyến tính khi $w$ tăng, và luôn nhỏ hơn cận lý thuyết khoảng $30$--$35\times$; đây là phần "buffer" mà Định lý~\ref{thm:cms} để lại cho trường hợp xấu nhất.
+
+\section{Chương trình trace chạy từng bước}
+
+Chương trình \texttt{tools/trace\_algorithms} nhận vào một luồng nhỏ và in ra trạng thái nội bộ của cả hai thuật toán sau mỗi bước: ma trận CMS đầy đủ và bảng Misra--Gries. Mục đích là (i) cung cấp bằng chứng trực quan rằng thuật toán đã cài đặt khớp với giả-mã, và (ii) tạo ra phụ lục \textit{minh họa chạy từng bước} để độc giả theo dõi được cơ chế ước lượng. Về định dạng output, trích đoạn cho CMS $w = 4$, $d = 2$ trên luồng $(a, b, a, c, a, b)$ như sau:
+
+\begin{lstlisting}[style=pseudo, caption={Trích output trace CMS}, label=lst:trace-excerpt]
+=== COUNT-MIN SKETCH TRACE ===
+Parameters: w=4, d=2, seeds=[0x9e3779b9, 0xb5b4db70]
+
+Step 1: RECORD 'a'
+  h1('a') mod 4 = 2
+  h2('a') mod 4 = 0
+  Matrix:
+    Row 0: [0, 0, 1, 0]
+    Row 1: [1, 0, 0, 0]
+  ...
+Step 6: RECORD 'b'
+  Matrix:
+    Row 0: [2, 0, 4, 0]
+    Row 1: [3, 1, 0, 2]
+
+=== QUERY ===
+  estimate('a') = min(4, 3) = 3
+  estimate('b') = min(2, 2) = 2
+  estimate('c') = min(4, 1) = 1
+\end{lstlisting}
+
+Output đầy đủ được in trong Phụ lục (xem \texttt{\outputDir/trace\_cms.txt} được \texttt{\textbackslash lstinputlisting} vào phụ lục). Trong luồng nhỏ này, QUERY cho đúng tần suất thật --- cho thấy rằng với $m = 6$ và $w = 4$, nhiễu đụng độ đã hoàn toàn bị loại bỏ bởi thao tác \textit{min}. Các trường hợp sai số chỉ xuất hiện khi $m$ lớn và đụng độ đủ trong mọi hàng, một hiện tượng được phân tích định lượng trong chương đánh giá.
+
+\section{Kết luận chương}
+
+Chương này đã hiện thực hoá đầy đủ ba thuật toán đã phân tích ở Chương~\ref{ch:compare} thành thư viện \texttt{libdsa} bằng C++17. Đóng góp cụ thể: (i) thiết kế giao diện \texttt{Estimator} thuần ảo theo Strategy Pattern và một Registry chuỗi-tới-factory cho phép chọn thuật toán bằng một tham số cấu hình mà không phải tái biên dịch; (ii) cài đặt \texttt{CountMinSketch} với layout ma trận liên tiếp, MurmurHash3 đầy đủ ba giai đoạn (block mixing, tail handling, finalization) và biến thể Conservative Update; (iii) cài đặt \texttt{HeavyHitters} (Misra--Gries) với logic ba nhánh đúng bản gốc và \texttt{HashMapExact} làm baseline; (iv) bộ kiểm thử đơn vị 23 test case xác nhận ba mệnh đề lý thuyết quan trọng (overestimate, biên $(\varepsilon, \delta)$, memory usage), tất cả đều \texttt{PASS}; (v) đo hiệu năng bằng Google Benchmark cho thấy CMS đạt $\sim 10^7$ ops/giây với $80$ KB bộ nhớ cố định, vượt Hash Map về thông lượng và bộ nhớ ngay khi $F_0$ đủ lớn. Các con số này là đầu vào cho chương kế tiếp, nơi cấu trúc dữ liệu được áp dụng vào pipeline phát hiện port-scan trên luồng IP và đo lại trong điều kiện ứng dụng thật.

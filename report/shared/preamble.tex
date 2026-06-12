@@ -1,0 +1,281 @@
+% ============================================================================
+% Preamble — Quy dinh trinh bay bao cao tot nghiep
+% Hoc vien Ky thuat Mat ma — Khoa Khoa hoc May tinh
+% Mon: Cong nghe Phan mem 1
+%
+% Tham chieu: Qui-dinh-viet-bao-cao-tot-nghiep (NTT, 03/2024), adapted.
+% ============================================================================
+
+% --- Geometry: A4, margins top=2cm, bottom=2cm, right=2cm, left=3cm ---------
+\usepackage[
+  a4paper,
+  top=20mm,
+  bottom=20mm,
+  left=30mm,
+  right=20mm,
+]{geometry}
+
+% --- Font: Times New Roman equivalent (TeX Gyre Termes) ---------------------
+% TeX Gyre Termes is metrically identical to Times New Roman.
+% If Times New Roman is installed on the system, replace the name below.
+\usepackage{fontspec}
+\setmainfont{TeX Gyre Termes}[
+  Ligatures=TeX,
+  BoldFont={TeX Gyre Termes Bold},
+  ItalicFont={TeX Gyre Termes Italic},
+  BoldItalicFont={TeX Gyre Termes Bold Italic},
+]
+\usepackage{microtype}
+\setlength{\emergencystretch}{2em}
+\usepackage{xurl}
+\urlstyle{same}
+
+% --- Vietnamese language support --------------------------------------------
+\usepackage[vietnamese]{babel}
+
+% --- Font size: 13pt body text ------------------------------------------------
+\usepackage{scrextend}
+\changefontsizes{13pt}
+
+% --- Line spacing: 1.5 ------------------------------------------------------
+\usepackage{setspace}
+\onehalfspacing
+
+% --- Paragraph: no indent, justified, 0pt before/after ----------------------
+\usepackage{indentfirst}          % indent first paragraph of each section
+\setlength{\parindent}{1.27cm}    % ~0.5 inch indent (Vietnamese academic norm)
+\setlength{\parskip}{0pt}
+
+% --- Math --------------------------------------------------------------------
+\usepackage{amsmath, amssymb, amsthm}
+\usepackage{mathtools}
+\numberwithin{equation}{chapter}
+\newcommand{\eqnref}[1]{Phương trình~\eqref{#1}}
+
+% Theorem-like environments
+\newtheorem{theorem}{Định lý}[chapter]
+\newtheorem{lemma}[theorem]{Bổ đề}
+\newtheorem{definition}[theorem]{Định nghĩa}
+\newtheorem{corollary}[theorem]{Hệ quả}
+
+% --- Graphics & Figures ------------------------------------------------------
+\usepackage{graphicx}
+\graphicspath{{../shared/figures/}{assets/screens/}{assets/images/}}
+\usepackage{float}
+\usepackage{subcaption}
+
+% --- Tables ------------------------------------------------------------------
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{longtable}
+\usepackage{multirow}
+\usepackage{tabularx}
+
+% --- Captions: Hinh X.Y / Bang X.Y ------------------------------------------
+\usepackage[
+  font={normalsize},
+  labelfont={bf},
+  labelsep=period,
+  justification=centering,
+]{caption}
+% Vietnamese caption names
+\addto\captionsvietnamese{%
+  \renewcommand{\figurename}{Hình}%
+  \renewcommand{\tablename}{Bảng}%
+}
+
+% --- Code listings (source code) ---------------------------------------------
+\usepackage{listings}
+\usepackage{xcolor}
+\AtBeginDocument{%
+  \providecommand{\lstlistingname}{Listing}%
+  \providecommand{\lstlistlistingname}{Listings}%
+  \renewcommand{\lstlistingname}{Mã nguồn}%
+  \renewcommand{\lstlistlistingname}{DANH MỤC MÃ NGUỒN}%
+}
+
+\definecolor{codebg}{HTML}{F5F5F5}
+\definecolor{codeframe}{HTML}{CCCCCC}
+\definecolor{keyword}{HTML}{0000FF}
+\definecolor{comment}{HTML}{008000}
+\definecolor{string}{HTML}{A31515}
+
+\lstset{
+  language=C++,
+  basicstyle=\ttfamily\small,
+  keywordstyle=\color{keyword}\bfseries,
+  commentstyle=\color{comment}\itshape,
+  stringstyle=\color{string},
+  backgroundcolor=\color{codebg},
+  frame=single,
+  rulecolor=\color{codeframe},
+  numbers=left,
+  numberstyle=\tiny\color{gray},
+  numbersep=8pt,
+  breaklines=true,
+  showstringspaces=false,
+  tabsize=4,
+  captionpos=b,
+  xleftmargin=1cm,
+  framexleftmargin=1cm,
+  extendedchars=true,
+  nolol=true,
+  inputencoding=utf8,
+  literate=%
+    {ε}{{$\varepsilon$}}1
+    {δ}{{$\delta$}}1
+    {≈}{{$\approx$}}1
+    {≤}{{$\leq$}}1
+    {≥}{{$\geq$}}1
+    {×}{{$\times$}}1
+    {→}{{$\rightarrow$}}1,
+}
+
+% Go language (not built into listings) — for SOC service excerpts.
+\lstdefinelanguage{Go}{
+  morekeywords={break,default,func,interface,select,case,defer,go,map,struct,
+    chan,else,goto,package,switch,const,fallthrough,if,range,type,continue,for,
+    import,return,var,nil,true,false,error,string,int,int64,bool,byte},
+  sensitive=true,
+  morecomment=[l]{//},
+  morecomment=[s]{/*}{*/},
+  morestring=[b]",
+  morestring=[b]`,
+}
+
+% Pseudocode style
+\lstdefinestyle{pseudo}{
+  language={},
+  basicstyle=\ttfamily\small,
+  keywordstyle=\bfseries,
+  morekeywords={if,else,for,while,return,function,end,then,do,input,output,Initialize,Update,Query},
+  commentstyle=\color{comment}\itshape,
+  morecomment=[l]{//},
+  frame=single,
+  numbers=left,
+  numberstyle=\tiny\color{gray},
+  xleftmargin=1cm,
+  framexleftmargin=1cm,
+}
+
+% --- Algorithm / Pseudocode (algorithmic) ------------------------------------
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+\floatname{algorithm}{Giải thuật}
+
+% --- TikZ for diagrams -------------------------------------------------------
+\usepackage{tikz}
+\usetikzlibrary{
+  arrows.meta,
+  calc,
+  chains,
+  decorations.pathreplacing,
+  fit,
+  matrix,
+  positioning,
+  shapes.geometric,
+  shapes.multipart,
+}
+\usepackage{pgfplots}
+\pgfplotsset{compat=1.18}
+\usepgfplotslibrary{fillbetween}
+
+% --- Hyperlinks --------------------------------------------------------------
+\usepackage[
+  colorlinks=true,
+  linkcolor=black,
+  citecolor=black,
+  urlcolor=blue,
+  bookmarks=true,
+  bookmarksnumbered=true,
+]{hyperref}
+
+% --- Bibliography: numeric, sorted -------------------------------------------
+\usepackage[
+  backend=biber,
+  style=numeric,
+  sorting=nty,          % name-title-year
+  language=english,
+  autolang=other,
+  maxbibnames=99,
+]{biblatex}
+\addbibresource{../shared/references.bib}
+\DeclareLanguageMapping{vietnamese}{english}
+\setcounter{biburlnumpenalty}{9000}
+\setcounter{biburlucpenalty}{9000}
+\setcounter{biburllcpenalty}{9000}
+
+% --- Headers & Footers: page number centered at bottom ----------------------
+\usepackage{fancyhdr}
+\pagestyle{fancy}
+\fancyhf{}
+\fancyfoot[C]{\thepage}
+\renewcommand{\headrulewidth}{0pt}
+\renewcommand{\footrulewidth}{0pt}
+
+% Plain style for chapter opening pages
+\fancypagestyle{plain}{%
+  \fancyhf{}
+  \fancyfoot[C]{\thepage}
+  \renewcommand{\headrulewidth}{0pt}
+}
+
+% --- Chapter & Section formatting --------------------------------------------
+\usepackage{titlesec}
+\renewcommand{\thechapter}{\arabic{chapter}}
+
+% CHUONG X. TEN CHUONG — 14pt, bold, centered, uppercase
+\titleformat{\chapter}[display]
+  {\normalfont\fontsize{14}{18}\bfseries\centering}
+  {\MakeUppercase{Chương\ \thechapter}}
+  {0pt}
+  {\MakeUppercase}
+\titlespacing*{\chapter}{0pt}{-20pt}{20pt}
+
+% Section: 13pt bold, left-aligned
+\titleformat{\section}
+  {\normalfont\fontsize{13}{17}\bfseries}
+  {\thesection.}
+  {0.5em}
+  {}
+\titlespacing*{\section}{0pt}{12pt}{6pt}
+
+% Subsection: 13pt bold, left-aligned
+\titleformat{\subsection}
+  {\normalfont\fontsize{13}{17}\bfseries}
+  {\thesubsection.}
+  {0.5em}
+  {}
+\titlespacing*{\subsection}{0pt}{10pt}{4pt}
+
+% Subsubsection: 13pt bold italic
+\titleformat{\subsubsection}
+  {\normalfont\fontsize{13}{17}\bfseries\itshape}
+  {\thesubsubsection.}
+  {0.5em}
+  {}
+\titlespacing*{\subsubsection}{0pt}{8pt}{4pt}
+
+% --- Table of Contents formatting --------------------------------------------
+\usepackage{tocloft}
+\renewcommand{\cftchapfont}{\bfseries}
+\renewcommand{\cftchappresnum}{Chương~}
+\renewcommand{\cftchapaftersnum}{.\ }
+\setlength{\cftchapnumwidth}{6em}
+\renewcommand{\cfttoctitlefont}{\hfil\fontsize{14}{18}\bfseries\MakeUppercase}
+\renewcommand{\cftloftitlefont}{\hfil\fontsize{14}{18}\bfseries\MakeUppercase}
+\renewcommand{\cftlottitlefont}{\hfil\fontsize{14}{18}\bfseries\MakeUppercase}
+\setlength{\cftbeforechapskip}{6pt}
+
+% --- Appendix ----------------------------------------------------------------
+\usepackage[toc,page]{appendix}
+\renewcommand{\appendixname}{PHỤ LỤC}
+\renewcommand{\appendixpagename}{PHỤ LỤC}
+\renewcommand{\appendixtocname}{PHỤ LỤC}
+
+% --- Misc --------------------------------------------------------------------
+\usepackage{enumitem}
+\setlist{nosep, leftmargin=*}
+
+\usepackage[autostyle=false, style=english]{csquotes}  % required by biblatex
+\usepackage{pdfpages}       % include external PDF pages if needed

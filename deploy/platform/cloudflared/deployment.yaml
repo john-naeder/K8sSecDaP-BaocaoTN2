@@ -1,0 +1,75 @@
+# cloudflared — outbound tunnel from cluster to Cloudflare edge.
+# Tunnel token must be supplied as Secret `cloudflared-token` (key
+# `tunnel-token`). Use SealedSecrets so it can live in Git.
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: cloudflare
+  labels:
+    app.kubernetes.io/part-of: networking
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cloudflared
+  namespace: cloudflare
+  labels:
+    app.kubernetes.io/name: cloudflared
+    app.kubernetes.io/managed-by: zt-platform
+spec:
+  replicas: 2                  # tolerate node loss
+  selector:
+    matchLabels: { app: cloudflared }
+  template:
+    metadata:
+      labels: { app: cloudflared }
+    spec:
+      containers:
+        - name: cloudflared
+          image: cloudflare/cloudflared:2024.12.2
+          args:
+            - tunnel
+            - --no-autoupdate
+            - --protocol
+            - http2
+            - --metrics
+            - 0.0.0.0:2000
+            - run
+            - --token
+            - $(TUNNEL_TOKEN)
+          env:
+            - name: TUNNEL_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: cloudflared-token
+                  key: tunnel-token
+          ports:
+            - { containerPort: 2000, name: metrics }
+          resources:
+            requests: { cpu: 50m, memory: 64Mi }
+            limits:   { cpu: 200m, memory: 128Mi }
+          livenessProbe:
+            httpGet: { path: /ready, port: metrics }
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          readinessProbe:
+            httpGet: { path: /ready, port: metrics }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65532
+            allowPrivilegeEscalation: false
+            capabilities: { drop: ["ALL"] }
+            seccompProfile: { type: RuntimeDefault }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: cloudflared-metrics
+  namespace: cloudflare
+spec:
+  selector: { app: cloudflared }
+  ports:
+    - { name: metrics, port: 2000, targetPort: metrics }

@@ -1,0 +1,31 @@
+% Duong cong suy dien overhead-vs-tai: tu chi phi DO THAT 1544 ns/connect
+% (Bang eval-overhead), chieu tuyen tinh sang % mot loi CPU theo connect/s.
+% Day la SUY DIEN giai tich, KHONG phai do thuc nghiem da-muc-tai.
+\begin{tikzpicture}
+\begin{axis}[
+    width=12cm, height=6.4cm,
+    xlabel={Tải kết nối (connect/giây)},
+    ylabel={Chi phí CPU nhân (\% một lõi)},
+    xmin=0, xmax=10500, ymin=0, ymax=1.8,
+    xtick={1000,2000,3000,5000,10000},
+    xticklabels={1k,2k,3k,5k,10k},
+    scaled x ticks=false,
+    grid=both, grid style={gray!18},
+    tick label style={font=\scriptsize}, label style={font=\small},
+    legend style={font=\scriptsize, at={(0.02,0.97)}, anchor=north west, draw=none, fill=none},
+    legend cell align=left,
+]
+  % Bien tren/duoi tu CI 95%: 1670 ns va 1418 ns / connect.
+  \addplot[name path=hi, draw=none, forget plot] coordinates {(0,0)(1000,0.167)(2000,0.334)(3000,0.501)(5000,0.835)(10000,1.670)};
+  \addplot[name path=lo, draw=none, forget plot] coordinates {(0,0)(1000,0.142)(2000,0.284)(3000,0.425)(5000,0.709)(10000,1.418)};
+  \addplot[blue!12] fill between[of=hi and lo];
+  \addlegendentry{khoảng CI 95\%}
+  % Duong trung tam: 1544 ns/connect.
+  \addplot[blue!70!black, very thick, mark=*, mark size=1.4pt]
+    coordinates {(0,0)(1000,0.154)(2000,0.309)(3000,0.463)(5000,0.772)(10000,1.544)};
+  \addlegendentry{$1544$ ns/connect (trung tâm)}
+  % Moc tai thuc nghiem da quan sat.
+  \draw[red!70!black, dashed] (axis cs:3000,0) -- (axis cs:3000,0.463)
+    node[above left=-2pt, font=\scriptsize, text=red!70!black]{quét dồn $\approx$3k};
+\end{axis}
+\end{tikzpicture}

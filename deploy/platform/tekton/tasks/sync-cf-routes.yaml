@@ -1,0 +1,49 @@
+# sync-cf-routes Task — sync Cloudflare tunnel and DNS from Git config
+# Triggered by ingress-config commits through Tekton Triggers
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: sync-cf-routes
+  namespace: tekton-pipelines
+  labels:
+    app.kubernetes.io/part-of: ingress-automation
+spec:
+  description: >-
+    Synchronize Cloudflare Tunnel ingress rules and DNS CNAME records from
+    config/ingress/routes.yaml.
+  params:
+    - name: config-path
+      type: string
+      default: config/ingress/routes.yaml
+    - name: script-path
+      type: string
+      default: manifests/cloudflared/sync-routes-from-config.sh
+  workspaces:
+    - name: source
+      description: Workspace containing the cloned Git repository
+  steps:
+    - name: sync
+      image: python:3.12-alpine
+      computeResources:
+        requests:
+          cpu: 100m
+          memory: 128Mi
+        limits:
+          cpu: 300m
+          memory: 256Mi
+      env:
+        - name: CF_API_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: cf-api-token
+              key: token
+      script: |
+        #!/usr/bin/env sh
+        set -eu
+
+        apk add --no-cache bash curl
+        pip install --no-cache-dir pyyaml
+
+        cd "$(workspaces.source.path)"
+        chmod +x "$(params.script-path)"
+        bash "$(params.script-path)" "$(params.config-path)"

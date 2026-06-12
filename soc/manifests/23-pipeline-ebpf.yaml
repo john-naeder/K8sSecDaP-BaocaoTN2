@@ -1,0 +1,204 @@
+# eBPF-mode pipeline: in-kernel kprobe/tcp_v4_connect collector → zt-pipeline.
+#
+# This is the "danh chính ngôn thuận" data path for the thesis: it REPLACES the
+# tcpdump-based 22-pipeline-live.yaml. The eBPF collector emits exactly the same
+# JSON NetworkEvent lines tcpdump_to_events.py produced, so the pipeline config
+# (event_source.type=stdin) is unchanged — we just feed stdin from a FIFO.
+#
+# Apply 22 (tcpdump) OR 23 (eBPF) on a given node, NOT both — running both makes
+# the node double-emit alerts. Keep 22 around as a fallback / comparison baseline.
+#
+#   collector ──(/stream/events.pipe FIFO)──▶ zt-pipeline ──alerts.json──▶ alert-bridge ──▶ NATS
+#
+# Collector image is built+pushed by K8sSecDaP-collector (GitHub Actions).
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: zt-pipeline-config-live      # same name/content as 22 → idempotent
+  namespace: zt-mapper
+data:
+  pipeline.yaml: |
+    algorithms:
+      frequency_estimator:
+        name: "count_min_sketch"
+        params:
+          width: 2048
+          depth: 5
+          threshold: 40
+      scc_detector:
+        name: "tarjan"
+      reachability:
+        name: "bfs"
+        params:
+          max_hops: 3
+      ip_classifier:
+        name: "lpm_trie"
+
+    networks:
+      - cidr: "10.244.0.0/16"
+        label: 1
+        name: "pod_network"
+      - cidr: "10.96.0.0/12"
+        label: 2
+        name: "service_network"
+      - cidr: "192.168.0.0/16"
+        label: 3
+        name: "node_network"
+      - cidr: "172.16.0.0/12"
+        label: 4
+        name: "private_rfc1918"
+      - cidr: "0.0.0.0/0"
+        label: 0
+        name: "external"
+
+    # eBPF mode: pipeline reads NetworkEvents from stdin (fed by the collector FIFO).
+    event_source:
+      type: "stdin"
+
+    analysis:
+      window_seconds: 60
+      scc_interval_seconds: 10
+      snapshot_interval_seconds: 5
+
+    output:
+      alerts_file: "/var/log/zt/alerts.json"
+      graph_file:  "/var/log/zt/graph.json"
+      stats_file:  "/var/log/zt/stats.json"
+
+    alert_handlers:
+      - name: "file"
+        params:
+          path: "/var/log/zt/alerts.json"
+      - name: "stderr"
+
+    severity_rules:
+      - type: "port_scan"
+        severity: "medium"
+      - type: "blast_radius"
+        severity: "high"
+      - type: "scc_anomaly"
+        severity: "high"
+
+    soc:
+      node_name: ""
+      namespace: ""
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: zt-pipeline-ebpf
+  namespace: zt-mapper
+  labels:
+    app.kubernetes.io/name: zt-pipeline-ebpf
+    app.kubernetes.io/component: detector-ebpf
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: zt-pipeline-ebpf
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: zt-pipeline-ebpf
+        app.kubernetes.io/component: detector-ebpf
+    spec:
+      hostNetwork: true                 # real node-level src addresses
+      hostPID: true                     # global PIDs → future PID→Pod enrichment (G2)
+      dnsPolicy: ClusterFirstWithHostNet
+      tolerations:
+        - { key: node-role.kubernetes.io/control-plane, operator: Exists, effect: NoSchedule }
+        - { key: node-role.kubernetes.io/master,        operator: Exists, effect: NoSchedule }
+      containers:
+        # ── eBPF collector: kprobe/tcp_v4_connect → JSON lines → FIFO ──────────
+        - name: collector
+          image: johnnaeder/ebpf-portscan-k8s-check:collector-ebpf-s3
+          imagePullPolicy: IfNotPresent
+          workingDir: /app              # collector loads ./tcp_connect.bpf.o
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -u
+              FIFO=/stream/events.pipe
+              [ -p "$FIFO" ] || mkfifo -m 0600 "$FIFO"
+              echo "[ebpf] collector starting on node ${NODE_NAME:-?}" >&2
+              while true; do
+                /app/collector > "$FIFO" || echo "[ebpf] collector exited $? — restart in 3s" >&2
+                sleep 3
+              done
+          env:
+            - name: NODE_NAME
+              valueFrom: { fieldRef: { fieldPath: spec.nodeName } }
+          volumeMounts:
+            - { name: stream, mountPath: /stream }
+            - { name: btf,    mountPath: /sys/kernel/btf, readOnly: true }
+            - { name: debugfs, mountPath: /sys/kernel/debug }
+          resources:
+            requests: { cpu: 50m,  memory: 64Mi }
+            limits:   { cpu: 500m, memory: 256Mi }
+          securityContext:
+            privileged: true            # load/attach BPF + access kernel BTF.
+            # Tighten later to: capabilities.add [BPF, PERFMON, NET_ADMIN]
+        # ── detection pipeline: reads FIFO on stdin ──────────────────────────
+        - name: pipeline
+          image: johnnaeder/ebpf-portscan-k8s-check:pipeline-soc-s2-r4
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -u
+              FIFO=/stream/events.pipe
+              echo "[ebpf] pipeline waiting on collector FIFO" >&2
+              while [ ! -p "$FIFO" ]; do sleep 1; done
+              while true; do
+                /usr/local/bin/zt-pipeline --config /etc/zt/pipeline.yaml < "$FIFO" \
+                  || echo "[ebpf] pipeline exited $? — restart in 3s" >&2
+                sleep 3
+              done
+          env:
+            - name: NODE_NAME
+              valueFrom: { fieldRef: { fieldPath: spec.nodeName } }
+            - name: POD_NAMESPACE
+              valueFrom: { fieldRef: { fieldPath: metadata.namespace } }
+          volumeMounts:
+            - { name: config, mountPath: /etc/zt, readOnly: true }
+            - { name: stream, mountPath: /stream }
+            - { name: alerts, mountPath: /var/log/zt }
+          resources:
+            requests: { cpu: 100m, memory: 128Mi }
+            limits:   { cpu: 1,    memory: 512Mi }
+        # ── alert bridge: alerts.json → NATS (unchanged from 22) ─────────────
+        - name: alert-bridge
+          image: johnnaeder/ebpf-portscan-k8s-check:alert-bridge-s2
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: NATS_URL
+              value: "nats://nats.soc.svc.cluster.local:4222"
+            - name: SUBJECT
+              value: "zt.alerts.raw"
+            - name: ALERTS_FILE
+              value: "/var/log/zt/alerts.json"
+          volumeMounts:
+            - { name: alerts, mountPath: /var/log/zt, readOnly: true }
+          resources:
+            requests: { cpu: 10m,  memory: 16Mi }
+            limits:   { cpu: 100m, memory: 64Mi }
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65532
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+      volumes:
+        - name: config
+          configMap:
+            name: zt-pipeline-config-live
+            items:
+              - { key: pipeline.yaml, path: pipeline.yaml }
+        - name: stream
+          emptyDir: {}
+        - name: alerts
+          emptyDir: {}
+        - name: btf
+          hostPath: { path: /sys/kernel/btf, type: Directory }
+        - name: debugfs
+          hostPath: { path: /sys/kernel/debug, type: Directory }

@@ -1,0 +1,28 @@
+# Build artifacts
+build/
+**/build/
+.cache/
+*.o
+*.a
+*.so
+CMakeFiles/
+CMakeCache.txt
+compile_commands.json
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+# Secrets
+*.env
+.env*
+.vault_password
+*.key
+*.pem
+secrets/
+!*.example
+# OS / IDE
+.idea/
+.vscode/
+.DS_Store
+plans/

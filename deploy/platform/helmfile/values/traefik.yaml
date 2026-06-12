@@ -1,0 +1,42 @@
+# Traefik — ingress controller. Cloudflare Tunnel ingresses through here:
+#   cloudflared → Service traefik → IngressRoute → app Pod
+deployment:
+  replicas: 1
+service:
+  # NodePort so workstation can hit Traefik directly via 100.120.16.113:30080
+  # (Tailscale IP of master). Cloudflare Tunnel still works because
+  # cloudflared sidecar inside cluster routes through ClusterIP regardless.
+  type: NodePort
+ports:
+  web:
+    port: 80
+    expose: { default: true }
+    exposedPort: 80
+    nodePort: 30080
+  websecure:
+    port: 443
+    expose: { default: true }
+    exposedPort: 443
+    tls: { enabled: true }
+    nodePort: 30443
+ingressRoute:
+  dashboard:
+    enabled: true        # default: only reachable cluster-internal
+providers:
+  kubernetesCRD:
+    enabled: true
+    allowCrossNamespace: true
+  kubernetesIngress:
+    enabled: true
+resources:
+  requests: { cpu: 100m, memory: 128Mi }
+  limits:   { memory: 256Mi }
+metrics:
+  prometheus:
+    # ServiceMonitor disabled at bootstrap because the Prometheus operator
+    # (kube-prometheus-stack, monitoring.coreos.com/v1 CRD) ships AFTER this
+    # helmfile — enabling here chickens-and-eggs the install. Re-enable once
+    # the `monitoring` ArgoCD App is Healthy (or rely on kube-prometheus-stack's
+    # `additionalServiceMonitors` to scrape Traefik instead).
+    serviceMonitor:
+      enabled: false

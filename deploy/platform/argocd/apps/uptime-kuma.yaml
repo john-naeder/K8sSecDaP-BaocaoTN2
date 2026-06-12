@@ -1,0 +1,27 @@
+# uptime-kuma — self-hosted status page / blackbox uptime monitoring.
+# Raw manifests (no Helm) live in platform/observability/uptime-kuma/.
+# Monitors are configured manually via the UI after first sync (state persists
+# on the PVC).
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: uptime-kuma
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: git@github.com:john-naeder/K8sSecDaP-deploy.git
+    targetRevision: main
+    path: platform/observability/uptime-kuma
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: monitoring
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true

@@ -1,0 +1,29 @@
+% Wireframe (mockup) khop voi web-console THAT: trang Incidents (/). Chuong 3.
+\begin{tikzpicture}[font=\scriptsize,
+    win/.style ={draw, rounded corners=3pt},
+    hbar/.style={draw, fill=blue!40!black, text=white, minimum height=0.6cm, align=left},
+    hrow/.style={draw, fill=blue!10, minimum width=11.4cm, minimum height=0.46cm},
+    row/.style ={draw, fill=white, minimum width=11.4cm, minimum height=0.44cm},
+    btn/.style ={draw, rounded corners=1pt, fill=blue!40!black, text=white, font=\tiny, inner sep=1.5pt},
+  ]
+  \node[win, minimum width=12cm, minimum height=7.4cm] (w) {};
+  \node[hbar, anchor=north west, minimum width=12cm] at (w.north west)
+    {\textbf{ZT-SOC Admin Console}\quad\quad \textcolor{blue!20}{Incidents}\;\;\textcolor{blue!20}{Reports}};
+  % Pending actions
+  \node[anchor=north west, font=\scriptsize\bfseries] at ([xshift=0.3cm,yshift=-0.7cm]w.north west) {Pending actions (2)};
+  \node[hrow, anchor=north] (ha) at (0,2.55) {};
+  \node[font=\tiny\bfseries] at (0,2.32) {ID\hspace{1.1cm}Incident\hspace{1.0cm}Type\hspace{1.0cm}Status\hspace{1.0cm}Created\hspace{1.0cm}Decide};
+  \foreach \i in {0,1}{
+    \node[row, anchor=north] at (0,{2.1-\i*0.46}) {};
+    \node[btn, anchor=east] at (4.55,{1.88-\i*0.46}) {Approve};
+    \node[btn, fill=gray!50, anchor=west] at (4.65,{1.88-\i*0.46}) {Reject};
+  }
+  % Incidents
+  \node[anchor=north west, font=\scriptsize\bfseries] at ([xshift=0.3cm,yshift=-3.0cm]w.north west) {Incidents (12)};
+  \node[hrow, anchor=north] (hi) at (0,-0.55) {};
+  \node[font=\tiny\bfseries] at (0,-0.78) {ID\hspace{0.7cm}Type\hspace{0.7cm}Source IP\hspace{0.7cm}Severity\hspace{0.7cm}Status\hspace{0.7cm}First seen\hspace{0.7cm}$\rightarrow$};
+  \foreach \i in {0,...,4}{
+    \node[row, anchor=north] at (0,{-1.0-\i*0.46}) {};
+    \node[font=\tiny, gray!60] at (0,{-1.22-\i*0.46}) {\dots\ \texttt{port\_scan}\ \ \texttt{10.244.x.y}\ \ high\ \ new\ \dots\ \textcolor{blue!60}{view $\rightarrow$}};
+  }
+\end{tikzpicture}

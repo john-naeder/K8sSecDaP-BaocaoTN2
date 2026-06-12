@@ -1,0 +1,49 @@
+# RBAC for incident-service.
+# Grants the service account least-privilege access:
+#   - read/write NetworkPolicy in namespace zt-targets (Layer-1 quarantine)
+#   - read/delete/patch Pods in namespace zt-targets (Layer-2 follow-up)
+# Cluster-wide get on namespaces is required by client-go discovery.
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: zt-incident-service
+  namespace: soc
+  labels:
+    app.kubernetes.io/name: zt-incident-service
+    app.kubernetes.io/part-of: zero-trust-mapper
+---
+# Namespaced role: pods + networkpolicies in zt-targets only.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: zt-incident-responder
+  namespace: zt-targets
+  labels:
+    app.kubernetes.io/managed-by: zt-soc
+rules:
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["networkpolicies"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch", "delete", "patch"]
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: zt-incident-responder
+  namespace: zt-targets
+  labels:
+    app.kubernetes.io/managed-by: zt-soc
+subjects:
+  - kind: ServiceAccount
+    name: zt-incident-service
+    namespace: soc
+roleRef:
+  kind: Role
+  name: zt-incident-responder
+  apiGroup: rbac.authorization.k8s.io

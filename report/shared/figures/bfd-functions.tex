@@ -1,0 +1,47 @@
+% Sơ đồ phân rã chức năng (BFD) của nền tảng SOC K8sSecDaP. Dùng ở Chương 3.
+\begin{tikzpicture}[
+    every node/.style={font=\small},
+    root/.style={draw, rounded corners=2pt, fill=blue!12, align=center,
+                 minimum width=4.6cm, minimum height=0.9cm},
+    grp/.style={draw, rounded corners=2pt, fill=green!12, align=center,
+                minimum width=2.6cm, minimum height=0.85cm},
+    leaf/.style={draw, align=center, fill=gray!6, font=\footnotesize,
+                 minimum width=2.6cm, minimum height=0.72cm},
+    edge/.style={-, thick},
+  ]
+  \node[root] (r) {Nền tảng giám sát \& phản hồi\\an ninh K8sSecDaP};
+
+  \node[grp, below=1.0cm of r, xshift=-6.2cm] (g1) {1. Thu thập\\sự kiện};
+  \node[grp, right=0.55cm of g1] (g2) {2. Phát hiện\\bất thường};
+  \node[grp, right=0.55cm of g2] (g3) {3. Quản lý\\sự cố};
+  \node[grp, right=0.55cm of g3] (g4) {4. Phản hồi\\chính sách};
+  \node[grp, right=0.55cm of g4] (g5) {5. Quan sát\\\& kiểm toán};
+
+  \draw[edge] (r) -- (g1); \draw[edge] (r) -- (g2); \draw[edge] (r) -- (g3);
+  \draw[edge] (r) -- (g4); \draw[edge] (r) -- (g5);
+
+  % --- Cot 1 ---
+  \node[leaf, below=0.7cm of g1] (l1) {1.1 eBPF kprobe\\\texttt{tcp\_v4\_connect}};
+  \node[leaf, below=0.25cm of l1] (l1b) {1.2 Chuẩn hoá\\sự kiện};
+  % --- Cot 2 (3 chuc nang con) ---
+  \node[leaf, below=0.7cm of g2] (l2) {2.1 Đếm tần suất\\(CMS) port-scan};
+  \node[leaf, below=0.25cm of l2] (l2b) {2.2 Đồ thị\\SCC / blast-radius};
+  \node[leaf, below=0.25cm of l2b] (l2c) {2.3 Ngưỡng \&\\cửa sổ thời gian};
+  % --- Cot 3 ---
+  \node[leaf, below=0.7cm of g3] (l3) {3.1 Vòng đời\\sự cố};
+  \node[leaf, below=0.25cm of l3] (l3b) {3.2 Làm giàu\\IP$\rightarrow$Pod};
+  % --- Cot 4 (3 chuc nang con) ---
+  \node[leaf, below=0.7cm of g4] (l4) {4.1 Sinh\\NetworkPolicy};
+  \node[leaf, below=0.25cm of l4] (l4b) {4.2 Duyệt \&\\áp cách ly};
+  \node[leaf, below=0.25cm of l4b] (l4c) {4.3 Kiểm chứng\\cách ly};
+  % --- Cot 5 ---
+  \node[leaf, below=0.7cm of g5] (l5) {5.1 Dashboard\\Grafana};
+  \node[leaf, below=0.25cm of l5] (l5b) {5.2 Nhật ký\\kiểm toán};
+
+  % Noi tung chuc nang cha -> chuoi chuc nang con (1 -> 1.1 -> 1.2 ...)
+  \draw[edge] (g1) -- (l1);  \draw[edge] (l1) -- (l1b);
+  \draw[edge] (g2) -- (l2);  \draw[edge] (l2) -- (l2b); \draw[edge] (l2b) -- (l2c);
+  \draw[edge] (g3) -- (l3);  \draw[edge] (l3) -- (l3b);
+  \draw[edge] (g4) -- (l4);  \draw[edge] (l4) -- (l4b); \draw[edge] (l4b) -- (l4c);
+  \draw[edge] (g5) -- (l5);  \draw[edge] (l5) -- (l5b);
+\end{tikzpicture}

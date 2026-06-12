@@ -1,0 +1,22 @@
+% Ba BPF map cua collector: cidr_map, events, sock_store. Chuong 2.
+\begin{tikzpicture}[font=\footnotesize, node distance=0.7cm,
+    m/.style={draw, rounded corners=3pt, align=left, minimum width=4.7cm,
+              minimum height=2.0cm, text width=4.4cm, inner sep=6pt},
+  ]
+  \node[m, fill=orange!14] (lpm)
+    {\textbf{\texttt{cidr\_map}} --- \texttt{BPF\_MAP\_TYPE\_LPM\_TRIE}\\[2pt]
+     \footnotesize key: \texttt{lpm\_key\{prefixlen, addr\}}\\
+     value: \texttt{\_\_u32} (nhãn vùng mạng)\\
+     max\_entries: 1024\\[2pt]
+     \textit{Phân loại IP theo CIDR ngay trong nhân (khớp tiền tố dài nhất).}};
+  \node[m, fill=green!12, right=of lpm] (rb)
+    {\textbf{\texttt{events}} --- \texttt{BPF\_MAP\_TYPE\_RINGBUF}\\[2pt]
+     \footnotesize dung lượng: $256\times1024$ B\\[2pt]
+     \textit{Bộ đệm vòng đa nhà sản xuất, một nhà tiêu thụ; chuyển} \texttt{network\_event\_t} \textit{từ nhân lên user, bảo toàn thứ tự.}};
+  \node[m, fill=blue!10, right=of rb] (hs)
+    {\textbf{\texttt{sock\_store}} --- \texttt{BPF\_MAP\_TYPE\_HASH}\\[2pt]
+     \footnotesize key: \texttt{\_\_u64} (\texttt{pid\_tgid})\\
+     value: \texttt{struct sock *}\\
+     max\_entries: 4096\\[2pt]
+     \textit{Giữ con trỏ} \texttt{sock} \textit{từ kprobe (vào) để kretprobe (ra) đọc lại.}};
+\end{tikzpicture}

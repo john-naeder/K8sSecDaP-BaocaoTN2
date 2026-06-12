@@ -1,0 +1,49 @@
+apiVersion: triggers.tekton.dev/v1beta1
+kind: TriggerTemplate
+metadata:
+  name: ingress-sync-template
+  namespace: tekton-pipelines
+  labels:
+    app.kubernetes.io/part-of: ingress-automation
+spec:
+  params:
+    - name: git-repo-url
+      description: SSH URL of the Git repository
+    - name: git-revision
+      description: Git revision to process
+  resourcetemplates:
+    - apiVersion: tekton.dev/v1
+      kind: PipelineRun
+      metadata:
+        generateName: ingress-sync-
+        namespace: tekton-pipelines
+        labels:
+          app.kubernetes.io/part-of: ingress-automation
+          tekton.dev/pipeline: ingress-sync
+      spec:
+        pipelineRef:
+          name: ingress-sync
+        taskRunTemplate:
+          serviceAccountName: tekton-build-sa
+          podTemplate:
+            nodeSelector:
+              kubernetes.io/hostname: userver-home-worker
+        params:
+          - name: repo-url
+            value: $(tt.params.git-repo-url)
+          - name: revision
+            value: $(tt.params.git-revision)
+        workspaces:
+          - name: shared-workspace
+            volumeClaimTemplate:
+              spec:
+                accessModes:
+                  - ReadWriteOnce
+                resources:
+                  requests:
+                    storage: 512Mi
+          - name: ssh-credentials
+            secret:
+              secretName: git-ssh-credentials
+        timeouts:
+          pipeline: "20m"

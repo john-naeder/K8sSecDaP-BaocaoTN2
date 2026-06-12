@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block title %}Incidents — ZT-SOC{% endblock %}
+{% block content %}
+  <h2>Pending actions ({{ actions|length }})</h2>
+  {% if actions %}
+  <table id="actions">
+    <thead><tr>
+      <th>ID</th><th>Incident</th><th>Type</th><th>Status</th><th>Created</th><th>Decide</th>
+    </tr></thead>
+    <tbody>
+    {% for a in actions %}
+      {% include "_action_row.html" %}
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+    <p><em>No pending actions.</em></p>
+  {% endif %}
+
+  <h2>Incidents ({{ incidents|length }})</h2>
+  <table>
+    <thead><tr>
+      <th>ID</th><th>Type</th><th>Source IP</th><th>Severity</th><th>Status</th><th>First seen</th><th></th>
+    </tr></thead>
+    <tbody>
+    {% for inc in incidents %}
+      <tr>
+        <td>{{ inc.id }}</td>
+        <td>{{ inc.type }}</td>
+        <td><code>{{ inc.source_ip }}</code></td>
+        <td><span class="sev-{{ inc.severity }}">{{ inc.severity }}</span></td>
+        <td><span class="status-{{ inc.status }}">{{ inc.status }}</span></td>
+        <td>{{ inc.created_at }}</td>
+        <td><a href="/incidents/{{ inc.id }}">view →</a></td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+{% endblock %}

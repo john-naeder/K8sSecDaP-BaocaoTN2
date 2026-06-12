@@ -1,0 +1,33 @@
+% Workflow agent thu thập (DaemonSet) trên node → xử lý tập trung. Dùng ở Chương 3.
+\begin{tikzpicture}[
+    node distance=0.65cm,
+    every node/.style={font=\footnotesize},
+    astep/.style={draw, rounded corners=2pt, fill=blue!10, align=center,
+                 minimum width=3.2cm, minimum height=0.8cm},
+    cstep/.style={astep, fill=green!12},
+    flow/.style={-{Stealth[length=2.2mm]}, thick},
+  ]
+  % Lane 1: trên mỗi node (DaemonSet)
+  \node[astep] (s1) {connect() được gọi\\trong Pod};
+  \node[astep, below=of s1] (s2) {kprobe bắt sự kiện,\\lọc src pod-network};
+  \node[astep, below=of s2] (s3) {Đẩy qua ring buffer\\$\rightarrow$ collector};
+  \node[astep, below=of s3] (s4) {Pipeline: CMS đếm,\\dựng đồ thị, sinh cảnh báo};
+
+  % Lane 2: tập trung
+  \node[cstep, right=3.6cm of s2] (c1) {NATS JetStream\\(bus tập trung)};
+  \node[cstep, below=of c1] (c2) {Aggregator hợp nhất\\đồ thị đa node};
+  \node[cstep, below=of c2] (c3) {Incident service\\tạo / làm giàu sự cố};
+  \node[cstep, below=of c3] (c4) {Lưu PostgreSQL +\\hiển thị cho Analyst};
+
+  \draw[flow] (s1) -- (s2);
+  \draw[flow] (s2) -- (s3);
+  \draw[flow] (s3) -- (s4);
+  \draw[flow] (s4.east) -- node[above, font=\scriptsize]{publish alert} (c1.west|-s4);
+  \draw[flow] (c1) -- (c2);
+  \draw[flow] (c2) -- (c3);
+  \draw[flow] (c3) -- (c4);
+
+  % swimlane labels
+  \node[font=\small\bfseries, above=0.2cm of s1] {Trên mỗi node — DaemonSet};
+  \node[font=\small\bfseries, above=0.2cm of c1] {Xử lý tập trung};
+\end{tikzpicture}

@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block title %}Incident #{{ incident.id }} — ZT-SOC{% endblock %}
+{% block content %}
+  <p><a href="/">← back to incidents</a></p>
+  <h2>Incident #{{ incident.id }} — {{ incident.type }}</h2>
+  <table>
+    <tr><th>Source IP</th><td><code>{{ incident.source_ip }}</code></td></tr>
+    <tr><th>Severity</th><td><span class="sev-{{ incident.severity }}">{{ incident.severity }}</span></td></tr>
+    <tr><th>Status</th><td><span class="status-{{ incident.status }}">{{ incident.status }}</span></td></tr>
+    <tr><th>Nodes observed</th><td>{{ incident.nodes_observed | join(", ") }}</td></tr>
+    <tr><th>Cross-node</th><td>{{ incident.cross_node }}</td></tr>
+    <tr><th>Occurrence count</th><td>{{ incident.occurrence_count }}</td></tr>
+    <tr><th>First seen</th><td>{{ incident.created_at }}</td></tr>
+    <tr><th>Last seen</th><td>{{ incident.updated_at }}</td></tr>
+  </table>
+
+  <h3>Actions</h3>
+  {% if actions %}
+  <table id="actions">
+    <thead><tr><th>ID</th><th>Incident</th><th>Type</th><th>Status</th><th>Created</th><th>Decide</th></tr></thead>
+    <tbody>
+    {% for a in actions %}{% include "_action_row.html" %}{% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+    <p><em>No actions yet.</em></p>
+  {% endif %}
+
+  <h3>Layer-2 follow-up</h3>
+  <p>Schedule a pod operation against the offending workload (admin-confirmed).</p>
+  <form class="followup"
+        hx-post="/incidents/{{ incident.id }}/follow-up"
+        hx-target="#actions tbody"
+        hx-swap="beforeend">
+    <label>Operation</label>
+    <select name="type">
+      <option value="delete_pod">delete_pod (controller will recreate)</option>
+      <option value="shutdown_pod">shutdown_pod (graceful, label, 5-min grace)</option>
+    </select><br>
+    <label>Namespace</label>
+    <input type="text" name="namespace" value="zt-targets" required><br>
+    <label>Pod name</label>
+    <input type="text" name="pod_name" placeholder="attacker" required><br>
+    <label>Reason</label>
+    <input type="text" name="reason" placeholder="Confirmed port-scan source"><br>
+    <button type="submit" class="danger">Schedule</button>
+  </form>
+
+  <h3>Audit log</h3>
+  <table>
+    <thead><tr><th>Time</th><th>Actor</th><th>Action</th><th>Diff</th></tr></thead>
+    <tbody>
+    {% for e in audit %}
+      <tr>
+        <td>{{ e.occurred_at }}</td>
+        <td>{{ e.actor }} <small>({{ e.actor_role or "system" }})</small></td>
+        <td>{{ e.action }}</td>
+        <td><code>{{ e.diff }}</code></td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+{% endblock %}

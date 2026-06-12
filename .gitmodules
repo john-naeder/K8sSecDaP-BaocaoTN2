@@ -1,0 +1,18 @@
+[submodule "infra"]
+	path = infra
+	url = git@github.com:john-naeder/K8sSecDaP-infra.git
+[submodule "deploy"]
+	path = deploy
+	url = git@github.com:john-naeder/K8sSecDaP-deploy.git
+[submodule "soc"]
+	path = soc
+	url = git@github.com:john-naeder/K8sSecDaP-soc.git
+[submodule "pipeline"]
+	path = pipeline
+	url = git@github.com:john-naeder/K8sSecDaP-pipeline.git
+[submodule "collector"]
+	path = collector
+	url = git@github.com:john-naeder/K8sSecDaP-collector.git
+[submodule "report"]
+	path = report
+	url = git@github.com:john-naeder/K8sSecDaP-report.git

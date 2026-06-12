@@ -1,0 +1,523 @@
+% ============================================================================
+% CHUONG: CO SO LY THUYET — COUNT-MIN SKETCH
+% ============================================================================
+
+\chapter{CƠ SỞ LÝ THUYẾT}
+\label{ch:theory}
+
+Chương này trình bày nền tảng lý thuyết của bài toán ước lượng tần suất điểm (\textit{Point Query}) trên luồng dữ liệu. Nội dung tập trung vào ba thành phần: mô hình luồng dữ liệu và các ràng buộc tài nguyên, các tính chất của họ hàm băm pairwise-independent, và cấu trúc dữ liệu Count-Min Sketch \cite{cormode2005cms} với phần chứng minh đầy đủ của định lý Cormode--Muthukrishnan (2005).
+
+\section{Mô hình luồng dữ liệu}
+
+\subsection{Định nghĩa hình thức và ràng buộc tài nguyên}
+
+\begin{definition}[Luồng dữ liệu]
+\label{def:stream}
+Cho \textbf{không gian phần tử} (universe) $U = \{1, 2, \ldots, n\}$ với $n$ phần tử phân biệt. Một \textbf{luồng dữ liệu} (\textit{data stream}) là chuỗi hữu hạn các phần tử
+\begin{equation}
+S = (a_1, a_2, \ldots, a_m),
+\label{eq:stream-sequence}
+\end{equation}
+trong đó mỗi $a_j \in U$ và $m$ là tổng số lượt xuất hiện. Các phần tử được xử lý tuần tự, mỗi phần tử chỉ được duyệt một lần (\textit{single-pass}).
+\end{definition}
+
+Trong bối cảnh giám sát mạng mang tinh thần Zero Trust --- nơi mọi kết nối đều phải được xác minh không phụ thuộc vị trí mạng --- $U$ là tập các địa chỉ IP nguồn (hoặc cặp $(\textit{src\_ip}, \textit{dst\_port})$ trong bài toán phát hiện port-scan), và $a_j$ là sự kiện kết nối thứ $j$ quan sát được trong cửa sổ thời gian. Giá trị $n$ có thể lên tới $2^{32}$ đối với IPv4 đơn thuần, và lớn hơn nhiều khi kết hợp với cổng; $m$ trong các mạng doanh nghiệp có thể đạt hàng triệu sự kiện mỗi giây.
+
+Tương ứng với định nghĩa trên, báo cáo giả định luồng thuộc dạng \textit{cash-register} (\textit{insert-only}) --- các phần tử chỉ được thêm vào, không có thao tác xóa --- cùng ba ràng buộc cốt lõi về tài nguyên: (i) \textbf{single-pass}, mỗi $a_j$ được đọc đúng một lần, không thể quay lại; (ii) \textbf{bộ nhớ giới hạn}, tổng bộ nhớ sử dụng phải là $o(\min(n, m))$, lý tưởng là $\mathrm{polylog}(n, m)$; (iii) \textbf{độ trễ không đổi}, thời gian xử lý mỗi phần tử là $O(1)$ hoặc $O(\log(\cdot))$ và độc lập với $m$. Ràng buộc bộ nhớ là lý do cơ bản buộc ta phải từ bỏ lời giải chính xác: khi $m$ vượt quá khả năng chứa của RAM ($m \gg M$ với $M$ là bộ nhớ khả dụng), hệ thống đếm chính xác bằng hash map sẽ bị từ chối cấp phát hoặc gây \textit{swap} làm sụp đổ hiệu năng \cite{chakrabarti2019streams}.
+
+\subsection{Moment của tần suất}
+
+\begin{definition}[Vector tần suất và moment]
+\label{def:freq}
+Với luồng $S$ theo Định nghĩa~\ref{def:stream}, tần suất của phần tử $i \in U$ được định nghĩa là
+\begin{equation}
+f_i = \big|\{j : a_j = i\}\big|.
+\label{eq:frequency-definition}
+\end{equation}
+Vector tần suất là $\mathbf{f} = (f_1, f_2, \ldots, f_n)$. Moment bậc $k$ của luồng được định nghĩa là
+\begin{equation}
+F_k = \sum_{i=1}^{n} f_i^{\,k}.
+\label{eq:frequency-moment}
+\end{equation}
+Đặc biệt, $F_1 = \|\mathbf{f}\|_1 = m$ chính là tổng số phần tử trong luồng, còn $F_0 = |\{i : f_i > 0\}|$ là số phần tử phân biệt.
+\end{definition}
+
+\paragraph{Minh họa bằng số.}
+Để thấy rõ ý nghĩa của từng moment, xét luồng mẫu $S = (a, b, a, c, a, b, d, a)$ với $m = 8$. Vector tần suất là $\mathbf{f} = (f_a, f_b, f_c, f_d) = (4, 2, 1, 1)$. Bảng~\ref{tab:moments-example} liệt kê các moment bậc thấp và ý nghĩa trực quan của chúng trong bối cảnh giám sát mạng.
+
+\begin{table}[H]
+  \centering
+  \caption{Minh họa các moment tần suất trên luồng $S = (a,b,a,c,a,b,d,a)$, $m=8$.}
+  \label{tab:moments-example}
+  \small
+  \begin{tabularx}{\linewidth}{@{}l l l X@{}}
+    \toprule
+    \textbf{Moment} & \textbf{Công thức} & \textbf{Giá trị} & \textbf{Ý nghĩa trong giám sát mạng} \\
+    \midrule
+    $F_0$ & $|\{i : f_i > 0\}|$          & $4$  & Số địa chỉ IP nguồn \textit{phân biệt} đã quan sát; đặc trưng quy mô đa dạng luồng \\
+    $F_1$ & $\sum_i f_i$                 & $8$  & Tổng số gói/sự kiện (bằng $m$); dùng làm mẫu số khi chuẩn hoá tần suất \\
+    $F_2$ & $\sum_i f_i^2$               & $22$ & Năng lượng phân phối; càng lớn nghĩa là luồng càng ``lệch'' (skewed), một số IP chiếm đa số lưu lượng \\
+    $F_\infty$ & $\max_i f_i$            & $4$  & Tần suất của phần tử nặng nhất (heavy hitter); dấu hiệu sớm của DDoS hoặc port-scan \\
+    \bottomrule
+  \end{tabularx}
+\end{table}
+
+Giá trị $F_2 / F_1^2 = 22/64 \approx 0{,}34$ là hệ số \textit{skew} thô: càng gần $1/F_0 = 0{,}25$ thì phân phối càng đều, càng gần $1$ thì càng tập trung. Bài toán Point Query không yêu cầu ước lượng $F_2$ trực tiếp nhưng chính $F_2$ là đại lượng mà Count Sketch (Mục~\ref{ch:compare}) ước lượng, giúp so sánh hai phương án.
+
+\section{Bài toán ước lượng tần suất điểm}
+
+\subsection{Phát biểu bài toán và yêu cầu sai số}
+
+\begin{definition}[Point Query]
+\label{def:pointquery}
+Cho luồng $S$ và một phần tử truy vấn $x \in U$. \textbf{Point Query} là bài toán trả lời $\hat{f}_x$ ước lượng cho tần suất thật $f_x$ của $x$ trong $S$. Thuật toán không biết trước tập các phần tử sẽ được truy vấn.
+\end{definition}
+
+Vì không biết trước $x$, thuật toán phải duy trì cấu trúc đủ tổng quát để trả lời bất kỳ truy vấn nào mà $x$ có thể thuộc $U$. Đây là điểm khác biệt căn bản với bài toán \textit{Heavy Hitters} (chỉ cần trả về $k$ phần tử tần suất cao nhất) và bài toán \textit{Distinct Count} (chỉ cần $F_0$). Do yêu cầu duy trì ở mức tổng quát không cho phép lưu trữ chính xác, lời giải gần đúng được đặc trưng bởi hai tham số: sai số tương đối $\varepsilon \in (0, 1)$ và xác suất thất bại $\delta \in (0, 1)$.
+
+\begin{definition}[$(\varepsilon, \delta)$-approximation]
+\label{def:epsdelta}
+Thuật toán gọi là $(\varepsilon, \delta)$-xấp xỉ cho Point Query nếu với mọi truy vấn $x \in U$:
+\begin{equation}
+\Pr\bigl[|\hat{f}_x - f_x| \le \varepsilon \cdot \|\mathbf{f}\|_1\bigr] \ge 1 - \delta.
+\label{eq:eps-delta-accuracy}
+\end{equation}
+\end{definition}
+
+Tham số $\varepsilon$ điều khiển \textbf{độ chính xác}: sai số tuyệt đối không vượt quá $\varepsilon \cdot m$. Tham số $\delta$ điều khiển \textbf{độ tin cậy}: xác suất sai lệch vượt ngưỡng không quá $\delta$. Ví dụ với $\varepsilon = 0{,}001$ và $\delta = 0{,}01$, thuật toán đảm bảo sai số $\le 0{,}1\%\cdot m$ với độ tin cậy $\ge 99\%$. Câu hỏi tự nhiên tiếp theo là: trong mức yêu cầu $(\varepsilon, \delta)$ nói trên, tối thiểu cần bao nhiêu bộ nhớ? Định lý dưới đây trả lời câu hỏi đó.
+
+\subsection{Giới hạn dưới về bộ nhớ}
+
+\begin{theorem}[Alon--Matias--Szegedy, 1996]
+\label{thm:ams}
+Mọi thuật toán deterministic giải bài toán Point Query với sai số tuyệt đối $\le \varepsilon \cdot m$ cần ít nhất $\Omega(1/\varepsilon)$ không gian bộ nhớ \cite{alon1996space}. Với thuật toán randomized cho phép sai số với xác suất $\delta$, cận dưới là $\Omega\bigl((1/\varepsilon)\log(1/\delta)\bigr)$ \cite{ganguly2012lower}.
+\end{theorem}
+
+Định lý~\ref{thm:ams} khẳng định Count-Min Sketch đạt \textbf{tối ưu lý thuyết} về độ phức tạp không gian (chỉ hơn hằng số so với cận dưới), nên mọi nỗ lực tiết kiệm bộ nhớ hơn nữa phải đi kèm với việc yếu đi yêu cầu về sai số hoặc độ tin cậy.
+
+\section{Hàm băm và tính chất}
+
+\subsection{Họ hàm băm universal và pairwise-independent}
+
+Phép phân tích Count-Min Sketch dựa trên hai tính chất ngẫu nhiên của hàm băm, được đặt theo thứ tự yêu cầu tăng dần: \textit{universal} (để kiểm soát tần suất đụng độ trung bình) và \textit{pairwise-independent} (để kiểm soát xác suất các cặp đụng độ).
+
+\begin{definition}[Họ hàm băm universal]
+\label{def:universal}
+Cho $\mathcal{H}$ là một họ hàm $h: U \to \{0, 1, \ldots, w-1\}$. $\mathcal{H}$ được gọi là \textbf{universal} nếu với mọi cặp $x \ne y \in U$:
+\begin{equation}
+\Pr_{h \sim \mathcal{H}}[h(x) = h(y)] \le \frac{1}{w}.
+\label{eq:universal-hash}
+\end{equation}
+\end{definition}
+
+\begin{definition}[Họ hàm băm pairwise-independent]
+\label{def:pairwise}
+Họ $\mathcal{H}$ là \textbf{pairwise-independent} nếu với mọi cặp $x \ne y \in U$ và mọi cặp giá trị $(u, v) \in \{0, \ldots, w-1\}^2$:
+\begin{equation}
+\Pr_{h \sim \mathcal{H}}\bigl[h(x) = u \wedge h(y) = v\bigr] = \frac{1}{w^2}.
+\label{eq:pairwise-independence}
+\end{equation}
+\end{definition}
+
+Hệ quả trực tiếp: nếu $h$ được chọn ngẫu nhiên từ một họ pairwise-independent thì với mọi $x \ne y$, biến cố $[h(x) = h(y)]$ xảy ra với xác suất đúng $1/w$ và các biến cố đụng độ $[h(x) = h(y)]$ với $y$ khác nhau là độc lập từng đôi. Tính chất này cho phép áp dụng bất đẳng thức Markov cho từng hàng trong Count-Min Sketch mà không phụ thuộc vào phân phối dữ liệu đầu vào \cite{mitzenmacher2005probability}, và là giả thiết then chốt trong chứng minh định lý Cormode--Muthukrishnan ở phần sau.
+
+\subsection{MurmurHash3 và minh hoạ tính toán}
+
+Trên lý thuyết, một họ pairwise-independent đơn giản có thể được xây dựng từ hàm tuyến tính $h_{a,b}(x) = \bigl((a x + b) \bmod p\bigr) \bmod w$ với $p$ là số nguyên tố $> n$ và $a, b$ chọn ngẫu nhiên. Tuy nhiên, trong cài đặt sản xuất, MurmurHash3 \cite{appleby2011murmur} được ưu tiên vì ba lý do: (i) \textbf{tốc độ} --- xử lý khoảng 4GB/s trên kiến trúc x86-64 hiện đại (benchmark \textit{SMHasher}), nhanh hơn đáng kể so với phép chia lấy dư trên số nguyên tố; (ii) \textbf{phân bố đồng đều} --- vượt qua toàn bộ bộ kiểm thử SMHasher về tính \textit{avalanche} và phân bố bit; (iii) \textbf{tính pairwise-independent xấp xỉ} --- tuy MurmurHash3 không phải pairwise-independent đúng nghĩa, phân tích thực nghiệm cho thấy độ lệch so với giả thuyết này nhỏ hơn biên sai số được đặt ra trong Định lý~\ref{thm:cms}. Để mô phỏng việc chọn độc lập $d$ hàm từ họ pairwise-independent, cài đặt \texttt{libdsa} sử dụng MurmurHash3 với $d$ giá trị \textit{seed} khác nhau, xem \texttt{count\_min\_sketch.cpp:19--60}.
+
+Để minh họa cách băm một khóa thực tế, xét địa chỉ IPv4 $x = 192.168.1.10$ được biểu diễn dưới dạng 4 byte little-endian: \texttt{0x0A01A8C0}. Giả sử CMS có $w = 2048$ cột và ta sử dụng hai seed đầu tiên $s_0 = \texttt{0x9e3779b9}$ và $s_1 = \texttt{0xb5b4db70}$ (sinh theo hệ số vàng như mô tả trong Mục~\ref{ch:impl}). Bảng~\ref{tab:murmur-trace} liệt kê các phép toán chính.
+
+\begin{table}[H]
+  \centering
+  \caption{Các bước tính MurmurHash3 (ví dụ).}
+  \label{tab:murmur-trace}
+  \small
+  \begin{tabularx}{\linewidth}{@{}l l X@{}}
+    \toprule
+    \textbf{Bước} & \textbf{Giá trị (hex 32-bit)} & \textbf{Mô tả} \\
+    \midrule
+    $k_0$                & \texttt{0x0A01A8C0}      & Đọc 4 byte đầu của khóa \\
+    $k_0 \cdot c_1$      & \texttt{0xC6D21C40}      & Nhân với $c_1 = \texttt{0xcc9e2d51}$, giữ 32 bit thấp \\
+    $\text{rotl}_{15}$   & \texttt{0x0E20630E}      & Xoay trái 15 bit \\
+    $\cdot\, c_2$        & \texttt{0x94A5A99A}      & Nhân với $c_2 = \texttt{0x1b873593}$ \\
+    $h \gets s_0 \oplus k$ & \texttt{0x0A929E23}    & XOR vào seed \\
+    $\text{rotl}_{13}$   & \texttt{0x253C4715}      & Xoay trái 13 bit \\
+    $h \cdot 5 + C$      & \texttt{0xB3DA7671}      & Nhân 5, cộng $C = \texttt{0xe6546b64}$ (bước mixing chính) \\
+    Finalization         & \texttt{0x7F13B5A6}      & Các phép xor-shift và nhân kết thúc \\
+    $\bmod\ w$           & $h \bmod 2048 = 1446$    & Chỉ số cột cho hàng 0 \\
+    \bottomrule
+  \end{tabularx}
+\end{table}
+
+\noindent Chi tiết: Ví dụ băm khóa 4 byte $x = \texttt{0x0A01A8C0}$ (IP 192.168.1.10) với seed $s_0 = \texttt{0x9e3779b9}$; trong bản khảo sát này ta dùng $w = 2048$ cột để minh hoạ chỉ số cột thu được sau các bước MurmurHash3.
+
+Với seed $s_1 = \texttt{0xb5b4db70}$ trên cùng khóa sẽ cho ra một chỉ số cột khác (ví dụ $h_1(x) \bmod 2048 = 732$) do seed khởi tạo khác biệt. Tính chất \textit{avalanche} của MurmurHash3 đảm bảo rằng thay đổi một bit đầu vào (ví dụ từ $192.168.1.10$ sang $192.168.1.11$, chênh lệch 1 bit) sẽ làm thay đổi trung bình 16 bit đầu ra, do đó hai chỉ số cột hoàn toàn khác nhau --- đây là điều kiện tiên quyết để hai kết nối IP liền kề không rơi vào cùng một ô và làm sai lệch ước lượng.
+
+\section{Cấu trúc dữ liệu Count-Min Sketch}
+
+\subsection{Mô tả}
+
+Count-Min Sketch \cite{cormode2005cms} là một cấu trúc dữ liệu tổng kết (\textit{sketch}) gồm:
+
+\begin{itemize}
+  \item Một ma trận đếm hai chiều $M[1..d][1..w]$ gồm $d$ hàng và $w$ cột, khởi tạo toàn 0.
+  \item $d$ hàm băm pairwise-independent $h_1, h_2, \ldots, h_d: U \to \{1, \ldots, w\}$ chọn ngẫu nhiên độc lập.
+\end{itemize}
+
+Với tham số đầu vào $(\varepsilon, \delta)$, hai kích thước được xác định là
+\begin{equation}
+w = \bigl\lceil e/\varepsilon \bigr\rceil, \qquad d = \bigl\lceil \ln(1/\delta) \bigr\rceil.
+\label{eq:cms-parameters}
+\end{equation}
+
+Tổng bộ nhớ do đó là $O\bigl((1/\varepsilon)\log(1/\delta)\bigr)$ từ đơn vị đếm, đúng bằng cận dưới thông tin đã nêu ở Định lý~\ref{thm:ams}.
+
+\begin{figure}[H]
+  \centering
+  \begin{tikzpicture}[
+    cell/.style={draw, minimum width=1cm, minimum height=0.8cm, anchor=center},
+    hashlabel/.style={font=\small\itshape},
+    xnode/.style={draw, circle, minimum size=0.7cm, inner sep=0pt, fill=blue!10},
+  ]
+    % Phan tu x
+    \node[xnode] (x) at (-3, -2) {$x$};
+
+    % Ma tran d=4 hang, w=6 cot
+    \foreach \r in {0,1,2,3} {
+      \foreach \c in {0,1,2,3,4,5} {
+        \node[cell] (c\r\c) at (\c*1cm, -\r*0.8cm) {};
+      }
+    }
+
+    % To mau cac o se duoc cap nhat
+    \node[cell, fill=orange!40] at (3*1cm, 0) {};
+    \node[cell, fill=orange!40] at (1*1cm, -0.8) {};
+    \node[cell, fill=orange!40] at (5*1cm, -1.6) {};
+    \node[cell, fill=orange!40] at (2*1cm, -2.4) {};
+
+    % Nhan hang
+    \node[left=4pt of c00, hashlabel] {$h_1$};
+    \node[left=4pt of c10, hashlabel] {$h_2$};
+    \node[left=4pt of c20, hashlabel] {$h_3$};
+    \node[left=4pt of c30, hashlabel] {$h_4$};
+
+    % Nhan cot: w = 6
+    \foreach \c in {0,1,2,3,4,5} {
+      \node[below=2pt of c3\c, font=\footnotesize] {\c};
+    }
+
+    % Mui ten tu x toi cac o duoc cap nhat
+    \draw[-{Stealth[length=2mm]}, thick, orange!70!black] (x) to[bend left=20]  (3*1cm, 0);
+    \draw[-{Stealth[length=2mm]}, thick, orange!70!black] (x) to[bend left=5]   (1*1cm, -0.8);
+    \draw[-{Stealth[length=2mm]}, thick, orange!70!black] (x) to[bend right=5]  (5*1cm, -1.6);
+    \draw[-{Stealth[length=2mm]}, thick, orange!70!black] (x) to[bend right=20] (2*1cm, -2.4);
+
+    % Ghi chu
+    \node[right=15pt of c35, align=left, font=\small] {%
+      Với $d = 4$, $w = 6$:\\
+      Mỗi phần tử $x$\\
+      cập nhật đúng $d$ ô,\\
+      một ô mỗi hàng.\\[4pt]
+      $\hat{f}_x = \min\limits_{i=1..d} M[i][h_i(x)]$%
+    };
+  \end{tikzpicture}
+  \caption{Cấu trúc Count-Min Sketch.}
+  \label{fig:cms-matrix}
+\end{figure}
+
+\noindent Chi tiết: Minh hoạ Count-Min Sketch với $d = 4$ hàng băm và $w = 6$ cột; mỗi phần tử $x$ cập nhật đúng $d$ ô, một ô mỗi hàng, và $\hat{f}_x = \min_{i=1..d} M[i][h_i(x)]$.
+
+\subsection{Thao tác UPDATE và QUERY}
+
+Hai thao tác chính của cấu trúc được trình bày ở Giải thuật~\ref{alg:cms-updatequery}. UPDATE tăng đúng $d$ ô --- mỗi ô một hàng --- cho mỗi sự kiện; QUERY trả về giá trị nhỏ nhất trong $d$ ô tương ứng của truy vấn.
+
+\begin{algorithm}[H]
+\caption{Count-Min Sketch --- UPDATE và QUERY}
+\label{alg:cms-updatequery}
+\begin{algorithmic}[1]
+\Require $w = \lceil e/\varepsilon \rceil$, $d = \lceil \ln(1/\delta) \rceil$
+\State $M[1..d][1..w] \gets$ ma trận toàn 0
+\State Chọn $d$ hàm băm pairwise-independent $h_1, \ldots, h_d: U \to \{1, \ldots, w\}$
+\Statex
+\Function{Update}{$a_j$}
+    \For{$i = 1$ \textbf{to} $d$}
+        \State $M[i][h_i(a_j)] \gets M[i][h_i(a_j)] + 1$
+    \EndFor
+\EndFunction
+\Statex
+\Function{Query}{$x$}
+    \State \Return $\displaystyle \min_{i = 1, \ldots, d} M[i][h_i(x)]$
+\EndFunction
+\end{algorithmic}
+\end{algorithm}
+
+UPDATE có độ phức tạp $O(d)$ thời gian, không phụ thuộc $m$ và $n$; QUERY cũng $O(d)$ thời gian. Tính chất \textit{min} là chìa khóa dẫn đến cận sai số chặt trong Định lý~\ref{thm:cms}. Để làm rõ dòng chảy điều khiển ở mức cài đặt, Hình~\ref{fig:cms-flow-update} và~\ref{fig:cms-flow-query} biểu diễn hai thao tác dưới dạng lưu đồ; đặc điểm đáng chú ý là cả hai đều là vòng lặp tuyến tính $d$ bước, không có nhánh có điều kiện, do đó chi phí worst-case trùng với best-case --- một tính chất quan trọng cho hệ thống thời gian thực.
+
+\begin{figure}[H]
+  \centering
+  \begin{tikzpicture}[
+    node distance=0.8cm and 1.4cm,
+    startstop/.style={draw, ellipse, minimum width=2.2cm, minimum height=0.8cm, fill=gray!15, font=\small},
+    process/.style={draw, rectangle, rounded corners=2pt, minimum width=4.2cm, minimum height=0.9cm, align=center, fill=blue!10, font=\small},
+    decision/.style={draw, diamond, aspect=2, minimum width=3.2cm, inner sep=1pt, fill=yellow!20, font=\small, align=center},
+    flow/.style={-{Stealth[length=2.5mm]}, thick},
+  ]
+    \node[startstop] (start) {Bắt đầu UPDATE($a_j$)};
+    \node[process, below=of start] (init) {$i \gets 1$};
+    \node[decision, below=of init] (cond) {$i \le d\,$?};
+    \node[process, below=of cond] (hash) {$c \gets h_i(a_j) \bmod w$};
+    \node[process, below=of hash] (inc)  {$M[i][c] \gets M[i][c] + 1$};
+    \node[process, below=of inc] (nexti) {$i \gets i + 1$};
+    \node[startstop, right=2.2cm of cond] (stop) {Kết thúc};
+
+    \draw[flow] (start) -- (init);
+    \draw[flow] (init) -- (cond);
+    \draw[flow] (cond) -- node[left, font=\scriptsize]{đúng} (hash);
+    \draw[flow] (hash) -- (inc);
+    \draw[flow] (inc)  -- (nexti);
+    \draw[flow] (nexti) -| ($(cond.west) + (-1.2,0)$) -- (cond.west);
+    \draw[flow] (cond.east) -- node[above, font=\scriptsize]{sai} (stop);
+  \end{tikzpicture}
+  \caption{Lưu đồ thao tác UPDATE của Count-Min Sketch.}
+  \label{fig:cms-flow-update}
+\end{figure}
+
+\noindent Chi tiết: Mô tả luồng điều khiển của \texttt{Update}: vòng lặp $d$ bước, mỗi bước tính chỉ số cột bằng hàm băm và tăng ô tương ứng; do không có nhánh có điều kiện nên chi phí worst-case là $O(d)$.
+
+\begin{figure}[H]
+  \centering
+  \begin{tikzpicture}[
+    node distance=0.75cm and 1.2cm,
+    startstop/.style={draw, ellipse, minimum width=2.2cm, minimum height=0.8cm, fill=gray!15, font=\small},
+    process/.style={draw, rectangle, rounded corners=2pt, minimum width=4.6cm, minimum height=0.9cm, align=center, fill=green!10, font=\small},
+    decision/.style={draw, diamond, aspect=2, minimum width=3.2cm, inner sep=1pt, fill=yellow!20, font=\small, align=center},
+    flow/.style={-{Stealth[length=2.5mm]}, thick},
+  ]
+    \node[startstop] (start) {Bắt đầu QUERY($x$)};
+    \node[process, below=of start] (init) {$i \gets 1$, \ $\hat f \gets +\infty$};
+    \node[decision, below=of init] (cond) {$i \le d\,$?};
+    \node[process, below=of cond] (hash) {$c \gets h_i(x) \bmod w$};
+    \node[process, below=of hash] (minv) {$\hat f \gets \min(\hat f,\, M[i][c])$};
+    \node[process, below=of minv] (nexti) {$i \gets i + 1$};
+    \node[startstop, right=2.2cm of cond] (ret) {Trả về $\hat f$};
+
+    \draw[flow] (start) -- (init);
+    \draw[flow] (init) -- (cond);
+    \draw[flow] (cond) -- node[left, font=\scriptsize]{đúng} (hash);
+    \draw[flow] (hash) -- (minv);
+    \draw[flow] (minv) -- (nexti);
+    \draw[flow] (nexti) -| ($(cond.west) + (-1.2,0)$) -- (cond.west);
+    \draw[flow] (cond.east) -- node[above, font=\scriptsize]{sai} (ret);
+  \end{tikzpicture}
+  \caption{Lưu đồ thao tác QUERY của Count-Min Sketch.}
+  \label{fig:cms-flow-query}
+\end{figure}
+
+\noindent Chi tiết: Mô tả thao tác \texttt{Query}: duyệt $d$ ô tương ứng trên $d$ hàng và lấy giá trị nhỏ nhất; thao tác \textit{min} giúp giảm ảnh hưởng của các ô nhiễu do đụng độ băm.
+
+\section{Đảm bảo sai số epsilon-delta: định lý và chứng minh}
+
+\begin{theorem}[Cormode \& Muthukrishnan, 2005]
+\label{thm:cms}
+Với $w = \lceil e/\varepsilon \rceil$, $d = \lceil \ln(1/\delta) \rceil$ và $d$ hàm băm được chọn độc lập từ một họ pairwise-independent, ước lượng $\hat{f}_x = \min_i M[i][h_i(x)]$ do Count-Min Sketch trả về thỏa mãn:
+\begin{enumerate}[label=(\alph*)]
+  \item $\hat{f}_x \ge f_x$ \textbf{luôn luôn}.
+  \item $\Pr\bigl[\hat{f}_x \le f_x + \varepsilon \cdot m\bigr] \ge 1 - \delta$.
+\end{enumerate}
+\end{theorem}
+
+\begin{proof}
+Phần chứng minh gồm bốn bước: (1) chứng minh tính chất ước lượng thừa; (2) biên kỳ vọng sai số trên một hàng; (3) áp dụng bất đẳng thức Markov; (4) hợp nhất $d$ hàng độc lập bằng thao tác lấy \textit{min}.
+
+\medskip\noindent\textbf{Bước 1 --- Tính chất ước lượng thừa (overestimate).}
+
+Xét hàng $i$ bất kỳ. Với mọi phần tử $x$, ô $M[i][h_i(x)]$ được tăng đúng một lần cho mỗi lần $x$ xuất hiện trong luồng, tức là được tăng tổng cộng $f_x$ lần do chính $x$. Ngoài ra, các phần tử $y \ne x$ có $h_i(y) = h_i(x)$ (đụng độ băm) cũng đóng góp vào ô này. Do các phép cộng chỉ làm tăng giá trị ô (insert-only), ta có
+\begin{equation}
+M[i][h_i(x)] = f_x + \sum_{y \ne x, h_i(y) = h_i(x)} f_y \ge f_x.
+\label{eq:cms-overestimate-row}
+\end{equation}
+Lấy min theo $i$: $\hat{f}_x = \min_i M[i][h_i(x)] \ge f_x$. \quad\checkmark~(a)
+
+\medskip\noindent\textbf{Bước 2 --- Kỳ vọng sai số trên một hàng.}
+
+Với hàng $i$ cố định, đặt biến ngẫu nhiên
+\begin{equation}
+X_i = M[i][h_i(x)] - f_x = \sum_{y \ne x} f_y \cdot \mathbb{1}[h_i(y) = h_i(x)].
+\label{eq:collision-noise-xi}
+\end{equation}
+
+Do họ hàm băm là pairwise-independent, với mọi $y \ne x$ ta có $\Pr[h_i(y) = h_i(x)] = 1/w$. Nhờ tính tuyến tính của kỳ vọng:
+\begin{equation}
+\mathbb{E}[X_i] = \sum_{y \ne x} f_y \cdot \Pr[h_i(y) = h_i(x)] = \frac{1}{w}\sum_{y \ne x} f_y \le \frac{m}{w}.
+\label{eq:expected-noise}
+\end{equation}
+
+Với $w = \lceil e/\varepsilon \rceil \ge e/\varepsilon$ ta được
+\begin{equation}
+\mathbb{E}[X_i] \le \frac{\varepsilon \cdot m}{e}.
+\label{eq:expected-noise-bound}
+\end{equation}
+
+\medskip\noindent\textbf{Bước 3 --- Áp dụng bất đẳng thức Markov.}
+
+Vì $X_i \ge 0$, bất đẳng thức Markov cho
+\begin{equation}
+\Pr[X_i \ge \varepsilon \cdot m] \le \frac{\mathbb{E}[X_i]}{\varepsilon \cdot m} \le \frac{\varepsilon m / e}{\varepsilon m} = \frac{1}{e}.
+\label{eq:markov-row-failure}
+\end{equation}
+
+Do đó xác suất hàng $i$ vượt ngưỡng sai số là không quá $1/e$.
+
+\medskip\noindent\textbf{Bước 4 --- Hợp nhất $d$ hàng độc lập.}
+
+Các hàm băm $h_1, \ldots, h_d$ được chọn độc lập, nên các biến $X_1, \ldots, X_d$ độc lập. Vì $\hat{f}_x = f_x + \min_i X_i$, biến cố $\hat{f}_x - f_x \ge \varepsilon m$ tương đương với việc \textit{tất cả} $d$ hàng cùng vượt ngưỡng:
+\begin{equation}
+\Pr[\hat{f}_x \ge f_x + \varepsilon m] = \Pr[\forall i: X_i \ge \varepsilon m] = \prod_{i=1}^{d} \Pr[X_i \ge \varepsilon m] \le \left(\frac{1}{e}\right)^d.
+\label{eq:all-rows-fail}
+\end{equation}
+
+Với $d = \lceil \ln(1/\delta) \rceil \ge \ln(1/\delta)$:
+\begin{equation}
+\left(\frac{1}{e}\right)^d \le e^{-\ln(1/\delta)} = \delta.
+\label{eq:delta-bound}
+\end{equation}
+
+Suy ra
+\begin{equation}
+\Pr[\hat{f}_x \le f_x + \varepsilon m] \ge 1 - \delta. \quad\checkmark~(b) \qedhere
+\label{eq:cms-final-guarantee}
+\end{equation}
+\end{proof}
+
+Cận $1/e$ ở Bước 3 là lý do giá trị $w$ được chọn là $\lceil e/\varepsilon \rceil$ (thay vì $\lceil 1/\varepsilon \rceil$ trong phát biểu sơ khởi): hằng số Euler tối thiểu hóa số hàng $d$ cần thiết. Một cách trực giác, $w$ kiểm soát \textit{biên độ} đụng độ trên một hàng, $d$ kiểm soát \textit{xác suất} một truy vấn gặp phải hàng xấu.
+
+\section{Biến thể Conservative Update}
+
+\begin{definition}[Conservative Update, Estan--Varghese]
+\label{def:cu}
+Trong thủ tục \textsc{Update} của Count-Min Sketch, thay vì cộng $1$ vào \textit{tất cả} $d$ ô liên quan đến $a_j$, chỉ cộng $1$ vào \textit{những ô có giá trị hiện tại nhỏ nhất}. Cụ thể, đặt $c = \min_i M[i][h_i(a_j)]$, ta cập nhật
+\begin{equation}
+M[i][h_i(a_j)] \gets \max\bigl(M[i][h_i(a_j)], c + 1\bigr) \quad \forall i.
+\label{eq:conservative-update}
+\end{equation}
+\end{definition}
+
+Biến thể này được đề xuất bởi Estan và Varghese năm 2003 trong bối cảnh đo lưu lượng mạng \cite{estan2003conservative}. Hai tính chất cần lưu ý:
+
+\begin{itemize}
+  \item Tính chất (a) của Định lý~\ref{thm:cms} vẫn được bảo toàn: $\hat{f}_x \ge f_x$ luôn đúng.
+  \item Sai số thực tế giảm đáng kể khi phân phối tần suất là \textit{skewed} (Zipfian) --- tình huống điển hình của lưu lượng mạng, nơi một số ít nguồn gây phần lớn lưu lượng.
+\end{itemize}
+
+Tuy nhiên, biên $(\varepsilon, \delta)$ ở phần (b) không còn chặt hơn, và thao tác UPDATE cần thêm một lần đọc $d$ ô trước khi ghi, tăng chi phí bộ nhớ \textit{bandwidth}. Cài đặt libdsa cung cấp Conservative Update như một tham số tùy chọn khi khởi tạo \texttt{CountMinSketch} (xem \texttt{count\_min\_sketch.cpp}).
+
+\subsection{Minh họa so sánh CMS chuẩn và Conservative Update}
+
+Để thấy rõ lợi ích của Conservative Update (CU), xét CMS với $w = 4$, $d = 2$ và các hàm băm như ở Mục~\ref{ch:compare} Bảng~\ref{tab:cms-hash}: $h_1(a){=}2, h_2(a){=}0, h_1(b){=}0, h_2(b){=}3, h_1(c){=}2, h_2(c){=}1$. Chạy cùng luồng $S = (a, b, a, c, a, b)$, Bảng~\ref{tab:cu-vs-cms} đặt cạnh nhau giá trị ô tối đa mà mỗi biến thể ghi nhận cho khóa nặng nhất $a$.
+
+\begin{table}[H]
+  \centering
+  \caption{So sánh CMS chuẩn và Conservative Update (CU) trên luồng $S = (a,b,a,c,a,b)$.}
+  \label{tab:cu-vs-cms}
+  \small
+  \begin{tabularx}{\linewidth}{@{}c l >{\raggedright\arraybackslash}X >{\raggedright\arraybackslash}X@{}}
+    \toprule
+    \textbf{Bước} & \textbf{Sự kiện} & \textbf{CMS chuẩn (ghi 2 ô)} & \textbf{CU (chỉ nâng ô thấp nhất)} \\
+    \midrule
+    1 & \texttt{+a} & $M[1,2]{=}1,\ M[2,0]{=}1$ & $M[1,2]{=}1,\ M[2,0]{=}1$ \\
+    2 & \texttt{+b} & $M[1,0]{=}1,\ M[2,3]{=}1$ & $M[1,0]{=}1,\ M[2,3]{=}1$ \\
+    3 & \texttt{+a} & $M[1,2]{=}2,\ M[2,0]{=}2$ & $M[1,2]{=}2,\ M[2,0]{=}2$ \\
+    4 & \texttt{+c} (đụng độ với $a$ tại hàng 1) & $M[1,2]{=}3,\ M[2,1]{=}1$ & $c=\min(2,0){=}0$; chỉ $M[2,1]{=}1$, \textbf{không tăng} $M[1,2]$ \\
+    5 & \texttt{+a} & $M[1,2]{=}4,\ M[2,0]{=}3$ & $M[1,2]{=}3,\ M[2,0]{=}3$ \\
+    6 & \texttt{+b} & $M[1,0]{=}2,\ M[2,3]{=}2$ & $M[1,0]{=}2,\ M[2,3]{=}2$ \\
+    \midrule
+    \multicolumn{2}{@{}l}{$\hat f_a = \min(\cdot)$} & $\min(4, 3) = 3$ & $\min(3, 3) = 3$ \\
+    \multicolumn{2}{@{}l}{$\hat f_c = \min(\cdot)$} & $\min(4, 1) = 1$ & $\min(3, 1) = 1$ \\
+    \bottomrule
+  \end{tabularx}
+\end{table}
+
+Ở bước 4, CMS chuẩn tăng ô $M[1,2]$ lên 3 dù thực ra đây là cột bị đụng độ giữa $a$ và $c$ --- ``nhiễu'' này tích lũy dần và đến bước 5 ô đã ghi nhận 4, vượt tần suất thật của $a$. CU phát hiện $M[2,1] = 0$ (ô thấp nhất của $c$), nên chỉ cộng 1 vào đó và \textit{không ghi đè} lên $M[1,2]$; kết quả là ô nhiễu không bị thổi phồng. Trên luồng thực tế có phân phối Zipfian, thí nghiệm của Estan \& Varghese \cite{estan2003conservative} cho thấy CU giảm sai số trung bình từ $30$--$70\%$.
+
+\section{Ứng dụng thực tiễn của ước lượng tần suất trên luồng}
+\label{sec:apps-cms}
+
+Mặc dù báo cáo này dùng bài toán giám sát mạng làm ví dụ dẫn dắt, ước lượng tần suất trên luồng xuất hiện gần như mọi nơi có dữ liệu sinh ra nhanh hơn khả năng lưu trữ. Để minh chứng tính phổ quát của CMS và chỉ ra các biến thể đã được thiết kế cho từng bối cảnh, mục này tổng hợp bốn họ ứng dụng lớn, nhóm thành hai chủ đề: (i) giám sát hạ tầng mạng và đo lường phân tán; (ii) truy vấn dữ liệu, ngôn ngữ và tìm kiếm.
+
+\subsection{Giám sát hạ tầng mạng và đo lường phân tán}
+
+Trong \textbf{phát hiện port-scan và DDoS}, CMS được triển khai trong phần cứng \textit{data-plane} của một số router tốc độ cao để đếm số gói tới mỗi cặp $(\textit{src\_ip}, \textit{dst\_port})$ trong cửa sổ trượt; khi tần suất vượt ngưỡng, gói được đánh dấu nghi ngờ \cite{estan2003conservative}. Cisco NetFlow phiên bản 9 sử dụng sketch tương tự dưới tên \textit{sampled counters} để xấp xỉ lưu lượng. Ở \textbf{cân bằng tải có nhận biết luồng nặng (heavy-hitter-aware ECMP)}, biết được các luồng ``voi'' (elephant flows) chiếm $>90\%$ lưu lượng cho phép đặt chúng qua các đường có bộ đệm lớn hơn, tránh nghẽn cổ chai.
+
+Bên cạnh mặt quan sát, tính \textit{mergeable} của sketch cho phép \textbf{đếm phân tán không cần khóa}: mỗi node duy trì CMS cục bộ rồi định kỳ đồng bộ về dịch vụ tổng hợp bằng phép cộng ma trận, không cần mutex; Facebook/Meta sử dụng cơ chế này trong hệ thống \textit{Scuba} để thống kê trạng thái cluster. Ở mảng \textbf{giám sát hiệu suất (APM)}, Datadog, New Relic và Prometheus dùng sketch dạng CMS/HLL để ước lượng số endpoint gọi, tỷ lệ lỗi theo tag mà không phải lưu từng bản ghi sự kiện. Một biến thể song sinh của CMS là HyperLogLog (ước lượng $F_0$ thay vì tần suất điểm); trong nhiều hệ thống, hai sketch được chạy song hành để trả lời hai câu hỏi ``có bao nhiêu IP phân biệt?'' và ``IP $x$ xuất hiện bao nhiêu lần?'' trong cùng một cửa sổ.
+
+\subsection{Truy vấn dữ liệu, ngôn ngữ và tìm kiếm}
+
+Ở mức \textbf{ước lượng lựa chọn (selectivity estimation)}, các hệ cơ sở dữ liệu như PostgreSQL, Oracle và ClickHouse dùng sketch để ước lượng số hàng thoả điều kiện $\texttt{WHERE}\ x = v$ trong bước lập kế hoạch truy vấn, giúp bộ tối ưu hóa chọn thứ tự nối bảng tốt hơn mà không phải quét toàn bảng \cite{cormode2005cms}. Cho \textbf{phát hiện truy vấn lặp lại}, hệ thống log cần xác định nhanh truy vấn nào được lặp nhiều lần để kích hoạt cơ chế lưu đệm (query-result caching); Misra-Gries là lựa chọn điển hình ở đây nhờ tính chất không bỏ sót các khóa có $f_x > \varepsilon m$.
+
+Trong xử lý ngôn ngữ tự nhiên, \textbf{đếm n-gram trên kho văn bản khổng lồ} là ứng dụng sớm nhất của CMS ngoài mạng: Google \cite{talbot2007randomised} đề xuất \textit{Randomised Language Models} dựa trên CMS để lưu xác suất của hàng tỷ n-gram trong bộ nhớ RAM cho hệ thống dịch máy, thay vì các bảng băm đầy đủ có dung lượng hàng trăm GB. Cuối cùng, ở \textbf{gợi ý từ khoá và sửa lỗi chính tả}, chuỗi truy vấn Google, Bing và các công cụ tìm kiếm nội bộ sử dụng CMS để duy trì xếp hạng gần đúng của các truy vấn phổ biến nhất, phục vụ gợi ý tự động (autocomplete) theo thời gian thực.
+
+\bigskip
+
+Các ứng dụng trên chia sẻ cùng một công thức: \textit{đổi sai số định lượng lấy bộ nhớ không đổi}. Đây chính là nguyên lý trung tâm mà báo cáo áp dụng cho bài toán giám sát mạng được sử dụng làm ví dụ dẫn dắt xuyên suốt.
+
+\section{Phương pháp và công cụ sử dụng}
+\label{sec:methods-and-tools}
+
+Để đảm bảo các kết quả ở chương sau (so sánh, cài đặt, đánh giá) có tính \textit{tái lập} và \textit{kiểm chứng được}, báo cáo tuân theo một quy trình phương pháp gồm bốn bước, mỗi bước dùng một bộ công cụ cụ thể.
+
+\subsection{Phương pháp nghiên cứu}
+\label{sec:methodology}
+
+Cách tiếp cận xuyên suốt là chu trình \textit{lý thuyết $\rightarrow$ cài đặt $\rightarrow$ thực nghiệm $\rightarrow$ đối chiếu}, lặp đi lặp lại cho từng tính chất quan trọng:
+
+\begin{enumerate}
+  \item \textbf{Phân tích lý thuyết.} Phát biểu hình thức bài toán Point Query với ràng buộc $(\varepsilon, \delta)$, dẫn xuất các công thức cận sai số và bộ nhớ từ bài báo gốc \cite{cormode2005cms,misra1982finding}, chứng minh đầy đủ định lý Cormode--Muthukrishnan bằng bốn bước Markov–union (Mục~\ref{thm:cms}).
+  \item \textbf{Hiện thực hoá.} Cài đặt ba thuật toán (Count-Min Sketch, Misra--Gries, Hash Map chính xác) bằng C++17 trong thư viện \texttt{libdsa}, tuân thủ giao diện \texttt{Estimator} chung để cho phép chuyển đổi qua Strategy Pattern (xem chi tiết ở Chương~\ref{ch:impl}).
+  \item \textbf{Đo thực nghiệm.} Sử dụng Google Benchmark đo thông lượng và bộ nhớ trên luồng tổng hợp $10^5$ khoá; sử dụng pipeline \texttt{tools/portscan-pipeline} đo trên luồng IP của ứng dụng phát hiện port-scan (Chương~\ref{ch:eval}). Mọi đo lường dùng hạt giống cố định để tái lập.
+  \item \textbf{Đối chiếu lý thuyết và thực nghiệm.} Mỗi đại lượng đo được (sai số CMS, kích thước bộ nhớ, throughput) được đặt cạnh cận lý thuyết tương ứng để kiểm chứng cài đặt --- ví dụ tỉ lệ \textit{sai số đo / cận lý thuyết} luôn nằm trong khoảng $28$--$35\%$ qua mọi $w$, khẳng định bất đẳng thức Markov dùng trong chứng minh là đúng nhưng lỏng.
+\end{enumerate}
+
+\subsection{Công cụ và môi trường}
+\label{sec:tools}
+
+Toàn bộ hệ thống được xây dựng bằng phần mềm mã nguồn mở, chạy được trên Linux/macOS với một bộ công cụ tối thiểu. Bảng~\ref{tab:tools} liệt kê các công cụ chính, vai trò và phiên bản tối thiểu.
+
+\begin{table}[H]
+  \centering
+  \caption{Công cụ sử dụng trong báo cáo và mã nguồn đính kèm.}
+  \label{tab:tools}
+  \small
+  \begin{tabularx}{\linewidth}{@{}l l X@{}}
+    \toprule
+    \textbf{Loại} & \textbf{Công cụ (phiên bản)} & \textbf{Vai trò} \\
+    \midrule
+    Ngôn ngữ        & C++17 (g++ $\ge$ 11 / clang++ $\ge$ 14) & Hiện thực \texttt{libdsa}, pipeline phát hiện port-scan \\
+    Build           & CMake $\ge$ 3.16, GNU Make            & Cấu hình build chéo nền tảng, target \texttt{ctest}/\texttt{trace\_outputs}/\texttt{portscan-pipeline} \\
+    Kiểm thử        & GoogleTest $\ge$ 1.14                  & 23 test case xác minh các tính chất lý thuyết (overestimate, $(\varepsilon,\delta)$ bound, memory) \\
+    Đo hiệu năng    & Google Benchmark $\ge$ 1.8             & Sinh \texttt{bench\_raw.json} với \textit{ops/s}, độ trễ trung bình, bộ nhớ thực \\
+    Hàm băm         & MurmurHash3 \cite{appleby2011murmur}   & Họ hàm pairwise-independent xấp xỉ cho CMS \\
+    Sinh dữ liệu    & Python 3.10                            & Script sinh stream port-scan tổng hợp + parse tcpdump $\rightarrow$ JSON Lines \\
+    Bắt gói thật    & \texttt{tcpdump} (libpcap)             & Tuỳ chọn: thu lưu lượng SYN từ máy thật cho demo Ch.5 \\
+    Soạn thảo       & LuaLaTeX + Biber + \texttt{latexmk}    & Build báo cáo PDF, hỗ trợ Unicode tiếng Việt qua \texttt{fontspec} \\
+    Vẽ biểu đồ      & TikZ + \texttt{pgfplots} 1.18          & Lưu đồ thuật toán, biểu đồ benchmark từ \texttt{output/bench/*.dat} \\
+    Quản lý mã      & Git + GitHub                            & Tái lập theo commit, đính kèm fixture trong \texttt{output/} \\
+    \bottomrule
+  \end{tabularx}
+\end{table}
+
+\subsection{Phương pháp đánh giá và tái lập}
+\label{sec:evaluation-methodology}
+
+Báo cáo đánh giá Count-Min Sketch theo \textit{ba lát cắt} bổ trợ lẫn nhau:
+
+\begin{itemize}
+  \item \textbf{Đúng đắn.} Bộ kiểm thử đơn vị GoogleTest (\texttt{libdsa/tests/}) khẳng định ba mệnh đề khoá: (i) \texttt{Overestimate}: $\hat f_x \ge f_x$ luôn đúng; (ii) \texttt{AccuracyBound}: với cấu hình $w=2048, d=5, m=10^5$, sai số đo được không vượt $\varepsilon m \approx 133$ ở mức tin cậy $1-\delta \approx 99{,}3\%$; (iii) \texttt{MemoryUsage}: \texttt{memory\_usage()} báo đúng $w \cdot d \cdot 8$ byte như công thức.
+  \item \textbf{Hiệu năng.} Google Benchmark đo throughput của \texttt{record}/\texttt{estimate} cho ba thuật toán, biến thiên $w \in \{512, 1024, 2048, 4096\}$ với $d = 5$ cố định. Output thô (\texttt{output/bench/bench\_raw.json}) được trích xuất sang CSV/DAT bằng \texttt{scripts/plot\_bench.py} cho \texttt{pgfplots}.
+  \item \textbf{Trên ứng dụng thực.} Pipeline \texttt{tools/portscan-pipeline} đẩy luồng 200 sự kiện IP qua đồng thời ba thuật toán, đối chiếu cảnh báo (\texttt{alerts.json}) và bảng so sánh (\texttt{comparison.csv}) (Chương~\ref{ch:eval}).
+\end{itemize}
+
+\noindent Mọi script và config đều được commit cùng báo cáo, hạt giống ngẫu nhiên cố định ở 42; người đọc có thể tái tạo bit-identical kết quả bằng các lệnh tóm tắt trong \texttt{DEMO.md} ở thư mục gốc dự án.
+
+\section{Kết luận chương}
+
+Chương này đã thiết lập: (1) mô hình luồng dữ liệu single-pass và các ràng buộc bộ nhớ; (2) yêu cầu $(\varepsilon, \delta)$-accuracy cho Point Query; (3) cận dưới Alon--Matias--Szegedy khẳng định Count-Min Sketch đạt tối ưu lý thuyết về không gian; (4) tính chất pairwise-independent của hàm băm và cách MurmurHash3 thỏa mãn xấp xỉ; (5) cấu trúc, thao tác UPDATE/QUERY và chứng minh đầy đủ định lý Cormode--Muthukrishnan; (6) phương pháp nghiên cứu và bộ công cụ kèm theo (CMake, GoogleTest, Google Benchmark, LuaLaTeX, TikZ/pgfplots) đảm bảo các thực nghiệm ở các chương sau là tái lập được. Nền tảng này là đầu vào cho chương kế tiếp, nơi so sánh Count-Min Sketch với các phương án thay thế và phân tích lựa chọn cuối cùng cho hệ thống giám sát mạng.

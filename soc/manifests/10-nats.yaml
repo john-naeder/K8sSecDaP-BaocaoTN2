@@ -1,0 +1,152 @@
+# Zero-Trust SOC — NATS JetStream cluster
+#
+# Event/alert bus for the SOC control plane:
+#   * zt.events.*         — raw NetworkEvent from DaemonSet pipelines
+#   * zt.alerts.raw       — detection alerts from per-node pipelines
+#   * zt.alerts.enriched  — correlated alerts from the aggregator
+#   * zt.actions.*        — response-action requests/approvals
+#
+# JetStream is enabled so messages survive NATS pod restarts — required because
+# the incident-service persists to Postgres asynchronously.
+#
+# Size: 3 replicas for HA; single-node is fine for dev. StatefulSet because
+# JetStream needs stable PVC identity.
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: soc
+  labels:
+    pod-security.kubernetes.io/enforce: baseline
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nats-config
+  namespace: soc
+data:
+  nats.conf: |
+    port: 4222
+    http_port: 8222     # monitoring endpoint
+    server_name: $POD_NAME
+
+    jetstream {
+      store_dir: /data/jetstream
+      max_memory_store: 256MB
+      max_file_store: 10GB
+    }
+    # cluster mode disabled in this single-replica demo deployment.
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nats
+  namespace: soc
+  labels:
+    app: nats
+spec:
+  selector:
+    app: nats
+  ports:
+    - name: client
+      port: 4222
+      targetPort: 4222
+    - name: monitor
+      port: 8222
+      targetPort: 8222
+---
+# Headless service — required for StatefulSet pod DNS used in cluster routes.
+apiVersion: v1
+kind: Service
+metadata:
+  name: nats-headless
+  namespace: soc
+spec:
+  clusterIP: None
+  selector:
+    app: nats
+  ports:
+    - name: client
+      port: 4222
+    - name: cluster
+      port: 6222
+    - name: monitor
+      port: 8222
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: nats
+  namespace: soc
+spec:
+  serviceName: nats-headless
+  replicas: 1
+  selector:
+    matchLabels:
+      app: nats
+  template:
+    metadata:
+      labels:
+        app: nats
+    spec:
+      terminationGracePeriodSeconds: 60
+      containers:
+        - name: nats
+          image: nats:2.10-alpine
+          args: ["-c", "/etc/nats/nats.conf"]
+          env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+          ports:
+            - name: client
+              containerPort: 4222
+            - name: cluster
+              containerPort: 6222
+            - name: monitor
+              containerPort: 8222
+          volumeMounts:
+            - name: config
+              mountPath: /etc/nats
+            - name: data
+              mountPath: /data
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: monitor
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: monitor
+            initialDelaySeconds: 30
+            periodSeconds: 30
+          resources:
+            requests: { cpu: 100m, memory: 256Mi }
+            limits:   { cpu: 500m, memory: 1Gi }
+      volumes:
+        - name: config
+          configMap:
+            name: nats-config
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 10Gi
+---
+# Optional: PodDisruptionBudget so rolling updates keep quorum.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: nats-pdb
+  namespace: soc
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: nats

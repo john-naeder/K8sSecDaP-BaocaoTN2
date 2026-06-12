@@ -1,0 +1,23 @@
+% Vi du do thi truyen thong: mot SCC kha nghi {A,B,C} + cac dinh khac. Chuong 2.
+\begin{tikzpicture}[font=\footnotesize, >={Stealth[length=2mm]},
+    v/.style={draw, circle, minimum size=0.85cm, fill=blue!8},
+    s/.style={draw, circle, minimum size=0.85cm, fill=red!14},
+  ]
+  \node[s] (A) at (0,0) {A};
+  \node[s] (B) at (1.6,0.7) {B};
+  \node[s] (C) at (1.6,-0.7) {C};
+  \node[v] (D) at (-1.8,0) {D};
+  \node[v] (E) at (3.4,0) {E};
+  \node[v] (F) at (3.4,-1.4) {F};
+  % SCC cycle A->B->C->A
+  \draw[->, thick] (A) -- (B);
+  \draw[->, thick] (B) -- (C);
+  \draw[->, thick] (C) -- (A);
+  % outside edges
+  \draw[->] (D) -- (A);
+  \draw[->] (B) -- (E);
+  \draw[->] (C) -- (F);
+  % highlight SCC
+  \node[draw, dashed, red, ellipse, fit=(A)(B)(C), inner sep=4pt,
+        label={[red,font=\scriptsize]below:{SCC khả nghi (liên thông mạnh)}}] {};
+\end{tikzpicture}

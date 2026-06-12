@@ -1,0 +1,30 @@
+# Build from the UMBRELLA repo root (clone with --recurse-submodules).
+# ─── Builder ────────────────────────────────────────────────────────────────
+FROM ubuntu:24.04 AS builder
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        build-essential cmake ca-certificates && rm -rf /var/lib/apt/lists/*
+WORKDIR /src
+COPY CMakeLists.txt ./
+COPY pipeline pipeline
+COPY tools    tools
+RUN cmake -S . -B /build -DBUILD_TESTS=OFF -DBUILD_BENCHMARKS=OFF -DBUILD_EBPF=OFF -DBUILD_TOOLS=ON \
+    && cmake --build /build -j"$(nproc)" --target zt-pipeline trace_algorithms
+
+# ─── Runtime ────────────────────────────────────────────────────────────────
+FROM ubuntu:24.04 AS runtime
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        libstdc++6 python3 ca-certificates tini tcpdump iproute2 && rm -rf /var/lib/apt/lists/*
+COPY --from=builder /build/bin/zt-pipeline       /usr/local/bin/zt-pipeline
+COPY --from=builder /build/bin/trace_algorithms  /usr/local/bin/trace_algorithms
+COPY scripts/generate_synthetic_events.py        /usr/local/bin/generate_synthetic_events.py
+COPY scripts/tcpdump_to_events.py                /usr/local/bin/tcpdump_to_events.py
+RUN chmod +x /usr/local/bin/generate_synthetic_events.py /usr/local/bin/tcpdump_to_events.py
+COPY config/pipeline.yaml                        /etc/zt/pipeline.yaml
+COPY soc/manifests/entrypoint-demo.sh            /usr/local/bin/entrypoint-demo.sh
+COPY soc/manifests/entrypoint-live.sh            /usr/local/bin/entrypoint-live.sh
+RUN chmod +x /usr/local/bin/entrypoint-demo.sh /usr/local/bin/entrypoint-live.sh
+ENV PIPELINE_CONFIG=/etc/zt/pipeline.yaml EVENTS_FILE=/tmp/events.json \
+    DEMO_INTERVAL=30 DEMO_COUNT=400 DEMO_ATTACK_START=250 DEMO_SCAN_PROBES=40 \
+    LIVE_IFACE=any DEMO_MODE=synthetic
+ENTRYPOINT ["/usr/bin/tini", "--"]
+CMD ["/bin/sh", "-c", "if [ \"$DEMO_MODE\" = live ]; then exec /usr/local/bin/entrypoint-live.sh; else exec /usr/local/bin/entrypoint-demo.sh; fi"]

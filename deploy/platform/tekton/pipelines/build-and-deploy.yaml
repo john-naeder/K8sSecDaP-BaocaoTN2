@@ -1,0 +1,165 @@
+# build-and-deploy Pipeline — BC2 CI: clone → kaniko build → push to
+# private Docker Hub repo (johnnaeder/*) → update GitOps manifest.
+# Harbor + Cosign + SLSA-L3 provenance from the original old_cluster
+# config were dropped (private Docker Hub is enough for the demo).
+#
+# Example PipelineRun:
+#   tkn pipeline start build-and-deploy \
+#     --param repo-url=git@github.com:john-naeder/K8sSecDaP-soc.git \
+#     --param revision=main \
+#     --param image=docker.io/johnnaeder/zt-incident-service:v0.3 \
+#     --param context=services/incident-service \
+#     --param manifest-path=manifests/35-incident-service.yaml \
+#     --workspace name=shared,volumeClaimTemplateFile=...
+apiVersion: tekton.dev/v1
+kind: Pipeline
+metadata:
+  name: build-and-deploy
+  namespace: tekton-pipelines
+  labels:
+    app.kubernetes.io/part-of: zt-platform
+spec:
+  description: >-
+    Clone source, build OCI image with Kaniko, push to a private OCI
+    registry, then patch the deployment manifest in the GitOps repo
+    with the new image tag so Argo CD picks up the change.
+  params:
+    - name: repo-url
+      description: Git repository URL
+      type: string
+    - name: revision
+      description: Git revision (branch/tag/sha)
+      type: string
+      default: "master"
+    - name: image
+      description: Full image reference (e.g. docker.io/johnnaeder/zt-incident-service:v0.3)
+      type: string
+    - name: dockerfile
+      description: Path to Dockerfile relative to context
+      type: string
+      default: "./Dockerfile"
+    - name: context
+      description: Build context (subdirectory within the repo)
+      type: string
+      default: "."
+    - name: extra-args
+      description: Extra args for Kaniko
+      type: array
+      default: []
+    - name: manifest-path
+      description: Path to deployment manifest in GitOps repo
+      type: string
+      default: "deploy/soc/35-incident-service.yaml"
+    - name: manifest-repo-url
+      description: SSH URL of GitOps manifests repository
+      type: string
+      default: "git@github.com:john-naeder/K8sSecDaP-soc.git"
+    - name: manifest-repo-branch
+      description: Git branch of GitOps manifests repository
+      type: string
+      default: "master"
+    - name: max-concurrent-builds
+      description: Maximum number of build PipelineRuns allowed at the same time
+      type: string
+      default: "2"
+
+  workspaces:
+    - name: shared-workspace
+      description: Shared workspace for source code
+    - name: ssh-credentials
+      optional: true
+      description: SSH key for private Git repos
+    - name: docker-credentials
+      optional: true
+      description: Docker config for registry auth
+
+  results:
+    - name: IMAGE_URL
+      description: The image URL produced by the build
+      value: $(tasks.build.results.IMAGE_URL)
+    - name: IMAGE_DIGEST
+      description: The image digest produced by the build
+      value: $(tasks.build.results.IMAGE_DIGEST)
+    - name: COMMIT_SHA
+      description: Git commit SHA that was built
+      value: $(tasks.clone.results.commit)
+
+  tasks:
+    - name: acquire-build-slot
+      taskRef:
+        name: build-slot-lock
+      params:
+        - name: mode
+          value: acquire
+        - name: max-slots
+          value: $(params.max-concurrent-builds)
+        - name: lock-id
+          value: $(context.pipelineRun.uid)
+
+    - name: clone
+      taskRef:
+        name: git-clone
+      runAfter:
+        - acquire-build-slot
+      workspaces:
+        - name: output
+          workspace: shared-workspace
+        - name: ssh-directory
+          workspace: ssh-credentials
+      params:
+        - name: url
+          value: $(params.repo-url)
+        - name: revision
+          value: $(params.revision)
+
+    - name: build
+      taskRef:
+        name: kaniko-build
+      runAfter:
+        - clone
+      workspaces:
+        - name: source
+          workspace: shared-workspace
+      params:
+        - name: IMAGE
+          value: $(params.image)
+        - name: DOCKERFILE
+          value: $(params.dockerfile)
+        - name: CONTEXT
+          value: $(params.context)
+        - name: EXTRA_ARGS
+          value: $(params.extra-args[*])
+
+    - name: promote
+      taskRef:
+        name: update-manifest
+      runAfter:
+        - build
+      workspaces:
+        - name: source
+          workspace: shared-workspace
+        - name: ssh-directory
+          workspace: ssh-credentials
+      params:
+        - name: image
+          value: $(params.image)
+        - name: digest
+          value: $(tasks.build.results.IMAGE_DIGEST)
+        - name: manifest-path
+          value: $(params.manifest-path)
+        - name: manifest-repo-url
+          value: $(params.manifest-repo-url)
+        - name: manifest-repo-branch
+          value: $(params.manifest-repo-branch)
+
+  finally:
+    - name: release-build-slot
+      taskRef:
+        name: build-slot-lock
+      params:
+        - name: mode
+          value: release
+        - name: max-slots
+          value: $(params.max-concurrent-builds)
+        - name: lock-id
+          value: $(context.pipelineRun.uid)

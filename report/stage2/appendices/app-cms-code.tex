@@ -1,0 +1,40 @@
+\chapter{Mã nguồn lõi: Count-Min Sketch}
+\label{app:cms}
+
+Count-Min Sketch là cấu trúc đếm tần suất xấp xỉ dùng trong pipeline để phát hiện quét
+cổng (kho \texttt{K8sSecDaP-pipeline}, \texttt{libdsa/src/frequency/count\_min\_sketch.cpp}).
+Cấu trúc gồm một bảng $d \times w$ ô đếm và $d$ hàm băm độc lập; \texttt{record} tăng một
+ô trên mỗi hàng, còn \texttt{estimate} trả về \emph{giá trị nhỏ nhất} trong $d$ ô tương
+ứng~--~đảm bảo ước lượng không bao giờ thấp hơn tần suất thật. Cơ sở lý thuyết về sai số
+$\varepsilon$--$\delta$ đã trình bày ở Chương~\ref{ch:foundations}.
+
+\begin{lstlisting}[language=C++,caption={Lõi \texttt{record}/\texttt{estimate}/\texttt{reset} của Count-Min Sketch.}]
+// table_ : d hang x w cot (uint64_t); seeds_ : d hat giong bam doc lap.
+void CountMinSketch::record(const void* key, size_t key_len) {
+    for (size_t i = 0; i < depth_; ++i) {
+        uint32_t col = hash(key, key_len, seeds_[i]) % width_;
+        table_[i][col]++;                       // tang 1 o tren moi hang
+    }
+}
+
+uint64_t CountMinSketch::estimate(const void* key, size_t key_len) const {
+    uint64_t min_val = std::numeric_limits<uint64_t>::max();
+    for (size_t i = 0; i < depth_; ++i) {
+        uint32_t col = hash(key, key_len, seeds_[i]) % width_;
+        min_val = std::min(min_val, table_[i][col]);  // lay MIN -> chan tren nhieu
+    }
+    return min_val;
+}
+
+void CountMinSketch::reset() {                  // dat lai khi het cua so tumbling
+    for (auto& row : table_) std::fill(row.begin(), row.end(), 0);
+}
+
+size_t CountMinSketch::memory_usage() const {   // bo nho khong doi theo so khoa
+    return depth_ * width_ * sizeof(uint64_t) + seeds_.size() * sizeof(uint32_t);
+}
+\end{lstlisting}
+
+Với cấu hình của đồ án ($d = 5$, $w = 2048$), bộ nhớ là $5 \times 2048 \times 8 \approx
+80$~KB và \emph{không đổi} dù số địa chỉ nguồn phân biệt tăng lên~--~đây chính là ưu thế
+của sketch so với đếm chính xác bằng \texttt{HashMap} (bộ nhớ tuyến tính theo số khóa).

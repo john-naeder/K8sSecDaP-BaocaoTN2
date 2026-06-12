@@ -1,0 +1,13 @@
+scenario,class,expected_alert,result
+B1 benign-15conn,benign,(none),OK-no-alert
+B2 benign-20conn,benign,(none),OK-no-alert
+B3 benign-25conn,benign,(none),OK-no-alert
+B4 benign-30conn,benign,(none),OK-no-alert
+B5 benign-35conn,benign,(none),OK-no-alert
+B-edge boundary-under-38,benign,(none),OK-no-alert
+S1 vertical-scan,attack,port_scan,DETECTED
+S2 lateral-scan,attack,blast_radius,DETECTED
+S3 burst-scan,attack,port_scan,DETECTED
+S4 boundary-over-45,attack,port_scan,DETECTED
+L-slow slow-scan-evasion,limit-FN,port_scan,MISSED
+L-chatty busy-benign-60conn,limit-FP,(none),FALSE-POSITIVE

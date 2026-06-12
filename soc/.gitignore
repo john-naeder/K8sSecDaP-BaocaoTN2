@@ -1,0 +1,17 @@
+# Go build outputs (binary name == module dir name)
+services/aggregator/aggregator
+services/alert-bridge/alert-bridge
+**/*.test
+**/*.out
+# generic compiled binaries
+**/dist/
+**/bin/
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+# OS / IDE
+.idea/
+.vscode/
+.DS_Store

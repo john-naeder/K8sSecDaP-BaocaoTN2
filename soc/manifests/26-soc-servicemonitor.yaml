@@ -1,0 +1,32 @@
+# ServiceMonitor for the SOC services so kube-prometheus-stack actually
+# scrapes their /metrics endpoints. The Prometheus Operator selects
+# ServiceMonitors by label `release: kube-prometheus` (its serviceMonitorSelector)
+# across all namespaces; plain `prometheus.io/scrape` pod annotations are ignored.
+#
+# Without this, the Grafana "Incidents & Actions" panels (which query
+# zt_incidents_created_total, zt_aggregator_active_incidents, ...) stay empty
+# even though the incidents table is full.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: zt-soc
+  namespace: soc
+  labels:
+    release: kube-prometheus        # matched by Prometheus.serviceMonitorSelector
+spec:
+  namespaceSelector:
+    matchNames: ["soc"]
+  selector:
+    matchExpressions:
+      - key: app.kubernetes.io/name
+        operator: In
+        values: ["zt-aggregator", "zt-incident-service"]
+  endpoints:
+    # aggregator exposes metrics on the `http` port (9100)
+    - port: http
+      path: /metrics
+      interval: 15s
+    # incident-service exposes metrics on the dedicated `metrics` port (9101)
+    - port: metrics
+      path: /metrics
+      interval: 15s

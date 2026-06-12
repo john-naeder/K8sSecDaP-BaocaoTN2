@@ -1,0 +1,69 @@
+# Traefik — ingress controller. Originally bootstrapped by helmfile so
+# the cluster has *something* serving TLS before ArgoCD itself is up,
+# then handed off to ArgoCD here for ongoing reconcile.
+#
+# Values mirror platform/helmfile/values/traefik.yaml; update both sides
+# if you change one (helmfile path still exists for fresh-cluster bootstrap).
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: traefik
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    chart: traefik
+    repoURL: https://traefik.github.io/charts
+    targetRevision: "34.3.0"
+    helm:
+      releaseName: traefik
+      valuesObject:
+        deployment:
+          replicas: 1
+        service:
+          # NodePort so workstation can hit Traefik via 100.120.16.113:30080
+          # (Tailscale IP of master node). Cloudflare Tunnel still works.
+          type: NodePort
+        ports:
+          web:
+            port: 80
+            expose: { default: true }
+            exposedPort: 80
+            nodePort: 30080
+          websecure:
+            port: 443
+            expose: { default: true }
+            exposedPort: 443
+            tls: { enabled: true }
+            nodePort: 30443
+        ingressRoute:
+          dashboard:
+            enabled: true
+        providers:
+          kubernetesCRD:
+            enabled: true
+            # IngressRoutes live in `traefik` ns but target Services in
+            # argocd / monitoring / soc — Traefik refuses cross-ns by
+            # default for security. Enable explicitly.
+            allowCrossNamespace: true
+          kubernetesIngress:
+            enabled: true
+        resources:
+          requests: { cpu: 100m, memory: 128Mi }
+          limits:   { memory: 256Mi }
+        metrics:
+          prometheus:
+            serviceMonitor:
+              enabled: false
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: traefik
+  syncPolicy:
+    automated:
+      prune: false
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true

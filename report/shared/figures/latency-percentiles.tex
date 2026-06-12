@@ -1,0 +1,18 @@
+% Do tre "may" cua vong phat hien -> ap NetworkPolicy (KHONG ke thoi gian con
+% nguoi duyet). So lieu DO THAT tu latency-report.sh: p50=54, trung binh=91, p95=234 ms.
+\begin{tikzpicture}
+\begin{axis}[
+    ybar,
+    width=10cm, height=6cm,
+    bar width=34pt,
+    enlarge x limits=0.32,
+    ymin=0, ymax=270,
+    ylabel={Độ trễ máy (ms)},
+    symbolic x coords={p50, trung bình, p95},
+    xtick=data,
+    nodes near coords, every node near coord/.append style={font=\small},
+    tick label style={font=\small}, label style={font=\small},
+]
+  \addplot[fill=teal!45, draw=teal!70!black] coordinates {(p50,54) (trung bình,91) (p95,234)};
+\end{axis}
+\end{tikzpicture}

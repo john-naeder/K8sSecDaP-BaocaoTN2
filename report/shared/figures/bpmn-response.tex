@@ -1,0 +1,40 @@
+% Quy trình nghiệp vụ (BPMN) phát hiện → duyệt → cách ly. Dùng ở Chương 3.
+\begin{tikzpicture}[
+    every node/.style={font=\footnotesize},
+    ev/.style={draw, circle, minimum size=0.85cm, thick},
+    evend/.style={ev, line width=1.3pt},
+    task/.style={draw, rounded corners=3pt, fill=blue!10, align=center,
+                 minimum width=2.4cm, minimum height=1.0cm},
+    gw/.style={draw, diamond, aspect=1.5, fill=yellow!22, align=center,
+               inner sep=1pt, minimum width=1.8cm},
+    flow/.style={-{Stealth[length=2.2mm]}, thick},
+  ]
+  % Hang chinh (ngang): start -> detect -> enrich -> sev
+  \node[ev, fill=green!18] (start) at (0,0) {};
+  \node[task, right=1.1cm of start] (detect) {Phát hiện\\(eBPF + CMS)};
+  \node[task, right=1.0cm of detect] (enrich) {Tạo sự cố\\+ làm giàu};
+  \node[gw, right=1.0cm of enrich] (sev) {Mức\\nghiêm trọng?};
+
+  % Nhanh "cao": -> draft -> appr (di xuong)
+  \node[task, right=1.2cm of sev] (draft) {Sinh bản nháp\\NetworkPolicy};
+  \node[gw, below=1.1cm of draft] (appr) {Analyst\\duyệt?};
+  \node[task, below=1.1cm of appr] (apply) {Áp cách ly\\(egress-deny)};
+  \node[evend, fill=red!15, below=1.0cm of apply] (done) {};
+
+  % Nhanh "thap" + "tu choi" -> theo doi -> ket thuc
+  \node[task, below=3.3cm of enrich] (low) {Ghi nhận \&\\theo dõi};
+  \node[evend, fill=gray!20, below=1.0cm of low] (done2) {};
+
+  \draw[flow] (start) -- (detect);
+  \draw[flow] (detect) -- (enrich);
+  \draw[flow] (enrich) -- (sev);
+  \draw[flow] (sev) -- node[above]{cao} (draft);
+  \draw[flow] (draft) -- (appr);
+  \draw[flow] (appr) -- node[right]{đồng ý} (apply);
+  \draw[flow] (apply) -- (done);
+  % "thap": sev xuong low
+  \draw[flow] (sev.south) |- node[pos=0.7, above]{thấp} (low.east);
+  % "tu choi": appr -> low (ngang trai)
+  \draw[flow] (appr.west) -| node[pos=0.25, above]{từ chối} (low.north);
+  \draw[flow] (low) -- (done2);
+\end{tikzpicture}

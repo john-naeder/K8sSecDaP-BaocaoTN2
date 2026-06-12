@@ -1,0 +1,15 @@
+# BC2 on-prem cluster — active. Read by ApplicationSet `cluster-roots`.
+cluster:
+  name: bc2-onprem
+  server: https://kubernetes.default.svc
+  rootPath: platform/argocd/apps
+
+platform:
+  provider: bare-metal
+  ingressClass: traefik
+  storageClass: local-path
+  exposure: cloudflared
+  cni: calico                  # BC2 standard — see cni/calico/
+
+workloads:
+  overlay: onprem

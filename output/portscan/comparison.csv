@@ -1,0 +1,4 @@
+algo,total_events,alerts,true_positives,false_positives,peak_memory_kb,throughput_eps
+cms,200,1,1,0,80.0195,208274
+mg,200,1,1,0,0.420898,167121
+hashmap,200,1,1,0,0.397461,218838

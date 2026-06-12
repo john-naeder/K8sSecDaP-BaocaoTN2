@@ -1,0 +1,58 @@
+# Attacker pod with nmap. Idle by default; user runs scans manually:
+#   kubectl -n zt-targets exec -it attacker -- /attack/scan.sh
+#
+# scan.sh enumerates pod IPs and runs an nmap port scan against each — those
+# TCP SYNs are caught by zt-pipeline-live (tcpdump on cni0) on each node.
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: attacker-scripts
+  namespace: zt-targets
+data:
+  scan.sh: |
+    #!/bin/sh
+    # Enumerate every pod IP in zt-targets, then nmap-scan top 100 ports.
+    set -e
+    echo "== discovering target pod IPs =="
+    IPS=$(getent hosts api.zt-targets.svc.cluster.local web.zt-targets.svc.cluster.local | awk '{print $1}' | sort -u)
+    # Also probe direct pod IPs by sweeping the pod CIDR a bit
+    for h in $IPS 10.244.1.10 10.244.2.10 10.244.3.10; do
+      echo "== nmap top-100 against $h =="
+      nmap -Pn -T4 -F "$h" || true
+    done
+
+  burst-scan.sh: |
+    #!/bin/sh
+    # Aggressive scan to clearly trigger CMS threshold (>40 SYNs from same src).
+    set -e
+    TARGET=${1:-api.zt-targets.svc.cluster.local}
+    echo "== bursting against $TARGET ports 1-200 =="
+    nmap -Pn -T5 -p1-200 "$TARGET" || true
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: attacker
+  namespace: zt-targets
+  labels:
+    app.kubernetes.io/name: attacker
+spec:
+  restartPolicy: Always
+  containers:
+    - name: attacker
+      image: instrumentisto/nmap:7.95
+      command: ["sleep", "infinity"]
+      volumeMounts:
+        - { name: scripts, mountPath: /attack }
+      resources:
+        requests: { cpu: 50m, memory: 64Mi }
+        limits:   { cpu: 1, memory: 256Mi }
+  volumes:
+    - name: scripts
+      configMap:
+        name: attacker-scripts
+        defaultMode: 0755
+        items:
+          - { key: scan.sh,       path: scan.sh }
+          - { key: burst-scan.sh, path: burst-scan.sh }

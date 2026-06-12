@@ -1,0 +1,43 @@
+% Wireframe (mockup) khop voi web-console THAT: trang Reports (/reports). Chuong 3.
+\begin{tikzpicture}[font=\scriptsize,
+    win/.style ={draw, rounded corners=3pt},
+    hbar/.style={draw, fill=blue!40!black, text=white, minimum height=0.6cm, align=left},
+    panel/.style={draw, fill=gray!4},
+    btn/.style ={draw, rounded corners=1pt, fill=blue!40!black, text=white, font=\tiny, inner sep=1.5pt},
+  ]
+  \node[win, minimum width=12cm, minimum height=8.0cm] (w) {};
+  \node[hbar, anchor=north west, minimum width=12cm] at (w.north west)
+    {\textbf{ZT-SOC Admin Console}\quad\quad \textcolor{blue!20}{Incidents}\;\;\textcolor{blue!20}{Reports}};
+  \node[anchor=north west, font=\scriptsize\bfseries] at ([xshift=0.3cm,yshift=-0.75cm]w.north west) {Weekly report --- 2026-W23};
+  % week selector + generate
+  \node[panel, anchor=north west, minimum width=11.4cm, minimum height=0.55cm] (sel) at ([xshift=0.3cm,yshift=-1.15cm]w.north west) {};
+  \node[anchor=west, font=\tiny] at ([xshift=0.1cm]sel.west) {ISO week (YYYY-WW): [\,\dots\,]\;\; };
+  \node[btn, anchor=west] at ([xshift=4.6cm]sel.west) {View};
+  \node[btn, fill=red!60!black, anchor=west] at ([xshift=5.6cm]sel.west) {Generate \& upload (MinIO)};
+
+  % Headline
+  \node[anchor=north west, font=\scriptsize\bfseries] at (-5.7,1.7) {Headline};
+  \node[panel, anchor=north west, minimum width=5.3cm, minimum height=1.8cm] (hl) at (-5.7,1.28) {};
+  \node[anchor=north west, font=\tiny, align=left] at ([xshift=0.1cm,yshift=-0.05cm]hl.north west)
+    {Window\ :\ From $\rightarrow$ To\\ Total incidents\ :\ N\\ MTTR median (s)\ :\ \dots\\ Audit events\ :\ \dots};
+  % Severity breakdown
+  \node[anchor=north west, font=\scriptsize\bfseries] at (0.2,1.7) {Severity breakdown};
+  \node[panel, anchor=north west, minimum width=5.3cm, minimum height=1.8cm] (sb) at (0.2,1.28) {};
+  \node[anchor=north west, font=\tiny, align=left] at ([xshift=0.1cm,yshift=-0.05cm]sb.north west)
+    {Severity\ |\ Count\\ critical\ |\ \dots\\ high\ |\ \dots\\ medium\ |\ \dots};
+  % Top attackers
+  \node[anchor=north west, font=\scriptsize\bfseries] at (-5.7,-0.85) {Top attackers};
+  \node[panel, anchor=north west, minimum width=5.3cm, minimum height=1.5cm] (ta) at (-5.7,-1.25) {};
+  \node[anchor=north west, font=\tiny, align=left] at ([xshift=0.1cm,yshift=-0.05cm]ta.north west)
+    {Source IP\ |\ Count\\ \texttt{10.244.x.y}\ |\ \dots};
+  % Actions breakdown
+  \node[anchor=north west, font=\scriptsize\bfseries] at (0.2,-0.85) {Actions breakdown};
+  \node[panel, anchor=north west, minimum width=5.3cm, minimum height=1.5cm] (ab) at (0.2,-1.25) {};
+  \node[anchor=north west, font=\tiny, align=left] at ([xshift=0.1cm,yshift=-0.05cm]ab.north west)
+    {Type\ |\ Count\\ quarantine\_pod\ |\ \dots};
+  % Audit export form
+  \node[anchor=north west, font=\scriptsize\bfseries] at ([xshift=0.3cm,yshift=-6.7cm]w.north west) {Compliance / forensic audit dump};
+  \node[panel, fill=blue!3, anchor=north west, minimum width=11.4cm, minimum height=0.7cm] (ax) at ([xshift=0.3cm,yshift=-7.05cm]w.north west) {};
+  \node[anchor=west, font=\tiny] at ([xshift=0.1cm]ax.west) {From [date] \ To [date] \ Actor [\,\dots\,] \ Format [CSV\,$\vee$]};
+  \node[btn, anchor=east] at ([xshift=-0.1cm]ax.east) {Download};
+\end{tikzpicture}

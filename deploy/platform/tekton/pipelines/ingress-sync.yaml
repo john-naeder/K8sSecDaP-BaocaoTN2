@@ -1,0 +1,58 @@
+apiVersion: tekton.dev/v1
+kind: Pipeline
+metadata:
+  name: ingress-sync
+  namespace: tekton-pipelines
+  labels:
+    app.kubernetes.io/part-of: ingress-automation
+spec:
+  description: >-
+    On ingress config changes, clone the repository and synchronize Cloudflare
+    tunnel routes plus DNS records from Git-managed config.
+  params:
+    - name: repo-url
+      type: string
+      description: SSH URL of the Git repository
+    - name: revision
+      type: string
+      description: Git revision to checkout
+      default: main
+    - name: config-path
+      type: string
+      default: config/ingress/routes.yaml
+    - name: script-path
+      type: string
+      default: manifests/cloudflared/sync-routes-from-config.sh
+  workspaces:
+    - name: shared-workspace
+    - name: ssh-credentials
+      optional: true
+
+  tasks:
+    - name: clone
+      taskRef:
+        name: git-clone
+      params:
+        - name: url
+          value: $(params.repo-url)
+        - name: revision
+          value: $(params.revision)
+      workspaces:
+        - name: output
+          workspace: shared-workspace
+        - name: ssh-directory
+          workspace: ssh-credentials
+
+    - name: sync-cf-routes
+      runAfter:
+        - clone
+      taskRef:
+        name: sync-cf-routes
+      params:
+        - name: config-path
+          value: $(params.config-path)
+        - name: script-path
+          value: $(params.script-path)
+      workspaces:
+        - name: source
+          workspace: shared-workspace

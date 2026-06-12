@@ -1,0 +1,146 @@
+\chapter{Kịch bản demo và minh chứng vận hành}
+\label{app:demo}
+
+Phụ lục này mô tả quy trình \emph{demo có thể tái lập} dùng để minh chứng hệ thống chạy
+thật trên cụm: từ việc xác nhận eBPF can thiệp ở tầng nhân, mô phỏng tấn công, tới vòng
+phát hiện~$\rightarrow$~phản hồi~$\rightarrow$~cách ly~$\rightarrow$~xác minh, cùng cách
+truy cập kho đối tượng MinIO và cách làm cho dashboard quan trắc hiển thị dữ liệu. Mọi
+lệnh đều chạy trên cụm thật ($3$~node: \texttt{userver-master}, \texttt{userver-worker-1},
+\texttt{userver-worker-home}).
+
+\section{Chuẩn bị và xác nhận hiện trạng cụm}
+
+\begin{lstlisting}[language={},caption={Xác nhận node và các pod thành phần đang chạy.}]
+$ kubectl get nodes
+$ kubectl -n zt-mapper get pods -o wide   # DaemonSet thu thap/pipeline tren moi node
+$ kubectl -n soc       get pods           # NATS, postgres, aggregator, incident, console, minio
+\end{lstlisting}
+
+DaemonSet \texttt{zt-pipeline-ebpf} hiện diện trên cả ba node (mỗi pod gồm ba container
+\texttt{collector}/\texttt{pipeline}/\texttt{alert-bridge}); các dịch vụ SOC nằm trong
+không gian tên \texttt{soc}.
+
+\section{Minh chứng eBPF can thiệp ở tầng nhân}
+\label{app:demo-ebpf}
+
+Đây là phần cốt lõi cần thể hiện khi bảo vệ. Mục tiêu: chứng minh chương trình eBPF đã
+\emph{nạp vào nhân}, \emph{qua trình kiểm chứng}, được \emph{JIT}, \emph{gắn móc} vào
+\texttt{tcp\_v4\_connect}, và đang \emph{bắt sự kiện} theo thời gian thực. Vì
+\texttt{DaemonSet} thu thập chạy \texttt{hostNetwork} và đặc quyền, chương trình eBPF nằm
+trong nhân của \emph{host}; do đó \texttt{bpftool} được chạy \emph{trên chính node} (đăng
+nhập node qua SSH, hoặc dùng container gỡ lỗi mức node):
+
+\begin{lstlisting}[language={},caption={Bốn minh chứng eBPF ở tầng nhân (chạy trên node, chụp màn hình từng bước).}]
+# Dang nhap node worker-1 (noi dat pod tan cong) roi chay:
+
+# (1) Chuong trinh da nap: kieu kprobe, gan vao tcp_v4_connect, da qua verifier + JIT
+$ sudo bpftool prog show | grep -A4 -i 'kprobe\|tcp_v4_connect'
+
+# (2) Ba BPF map: cidr_map (lpm_trie), events (ringbuf), sock_store (hash)
+$ sudo bpftool map show | grep -i 'cidr_map\|events\|sock_store'
+
+# (3) Doi chieu: cac CIDR pod-network da nap vao bo loc LPM
+$ sudo bpftool map dump name cidr_map | head
+
+# (4) Tracing thoi gian thuc tu trong container (khong can bpftool):
+#     moi connect() sinh mot su kien JSON
+$ POD=$(kubectl -n zt-mapper get pod -l app.kubernetes.io/name=zt-pipeline-ebpf \
+        --field-selector spec.nodeName=userver-worker-1 \
+        -o jsonpath='{.items[0].metadata.name}')
+$ kubectl -n zt-mapper logs $POD -c collector -f
+\end{lstlisting}
+
+\noindent\textit{[Chèn ảnh chụp đầu ra của bốn lệnh trên~--~đây là minh chứng mạnh nhất
+cho phần eBPF.]} Điểm cần chỉ ra khi trình bày: dòng \texttt{kprobe ... tcp\_v4\_connect}
+(điểm móc), các trường \texttt{xlated/jited} (đã qua verifier và JIT), và ba map đúng
+kiểu \texttt{lpm\_trie}/\texttt{ringbuf}/\texttt{hash}. So với một agent ở không gian
+người dùng, đây là bằng chứng hệ thống quan sát \emph{tại nguồn} trong nhân với chi phí
+cố định trên mỗi lời gọi.
+
+\section{Mô phỏng tấn công: quét cổng và lan truyền ngang}
+\label{app:demo-attack}
+
+Một pod đóng vai kẻ tấn công trong không gian tên \texttt{zt-targets} thực hiện quét cổng
+\texttt{connect} (\texttt{nmap -sT}) tới nhiều pod dịch vụ, vượt ngưỡng $\tau=40$ kết nối
+trong cửa sổ thời gian để kích hoạt cảnh báo, đồng thời chạm tới nhiều đích để kích hoạt
+cảnh báo \emph{blast radius}.
+
+\begin{lstlisting}[language={},caption={Kịch bản tấn công từ pod \texttt{attacker}.}]
+# Quet cong connect-scan toi dai pod dich vu (vuot nguong -> port_scan)
+$ kubectl -n zt-targets exec attacker -- \
+    nmap -sT -p 1-200 --max-rate 200 10.244.204.0/24
+
+# Cham toi nhieu dich de kich hoat blast_radius (lan truyen ngang)
+$ kubectl -n zt-targets exec attacker -- \
+    sh -c 'for ip in 10.244.204.{150..180}; do nc -w1 -z $ip 80; done'
+\end{lstlisting}
+
+\section{Vòng phát hiện -- phản hồi -- cách ly -- xác minh}
+
+\begin{lstlisting}[language={},caption={Quan sát vòng end-to-end từ phát hiện tới cách ly.}]
+# (1) Pipeline phat canh bao (port_scan / blast_radius)
+$ kubectl -n zt-mapper logs $POD -c pipeline | grep ALERT
+
+# (2) Dich vu su co tao su co + tu sinh ban nhap NetworkPolicy
+$ kubectl -n soc logs deploy/zt-incident-service | grep -E 'incident.created|action'
+
+# (3) Phe duyet tren console (console.zt.local) -> hanh dong chuyen 'executed'
+#     -> NetworkPolicy cach ly duoc ap
+$ kubectl -n zt-targets get networkpolicy | grep quarantine
+
+# (4) Xac minh hieu luc: pod tan cong mat ket noi di ra
+$ kubectl -n zt-targets exec attacker -- nc -w2 10.244.204.161 80; echo "exit=$?"
+# exit=1  (truoc khi cach ly: exit=0)
+\end{lstlisting}
+
+\noindent\textit{[Chèn ảnh chụp console: hàng đợi phê duyệt, chi tiết sự cố, và trạng
+thái \texttt{executed} của hành động cách ly~--~xem các Hình ở
+mục~\ref{sec:impl-app}.]}
+
+\section{Truy cập kho đối tượng MinIO}
+\label{app:demo-minio}
+
+MinIO (không gian tên \texttt{soc}) là kho đối tượng lưu báo cáo tuần, bản sao lưu cơ sở
+dữ liệu và bản nháp \texttt{NetworkPolicy}. MinIO \emph{không} mở ra ngoài qua ingress;
+truy cập an toàn bằng cách chuyển tiếp cổng tới giao diện console (\texttt{:9001}):
+
+\begin{lstlisting}[language={},caption={Truy cập MinIO console và liệt kê bucket.}]
+# Chuyen tiep cong console MinIO ra may cuc bo
+$ kubectl -n soc port-forward svc/minio 9001:9001
+# Mo http://localhost:9001  (user: zt-soc-admin)
+
+# Hoac dung mc qua port-forward API (:9000)
+$ kubectl -n soc port-forward svc/minio 9000:9000 &
+$ mc alias set zt http://localhost:9000 zt-soc-admin '<minio-password>'
+$ mc ls zt   # zt-postgres-backups, zt-reports, zt-pcap-dumps, zt-netpol-archives
+\end{lstlisting}
+
+Trên trang \emph{Reports} của console, nút \emph{Generate \& upload to MinIO} kết xuất
+báo cáo tuần và đẩy lên bucket \texttt{zt-reports}; có thể kiểm chứng bằng
+\texttt{mc ls zt/zt-reports}.
+
+\section{Làm cho dashboard quan trắc hiển thị dữ liệu}
+\label{app:demo-grafana}
+
+Console/Reports đọc trực tiếp PostgreSQL nên luôn hiển thị đầy đủ sự cố tích lũy. Trái
+lại, dashboard Grafana là góc nhìn theo cửa sổ thời gian và phụ thuộc nguồn thu thập, nên
+có thể trống dù cơ sở dữ liệu đầy. Để dashboard hiển thị dữ liệu cần:
+
+\begin{enumerate}
+  \item \textbf{Bảng \emph{Alerts Overview} (nguồn Loki).} Nới cửa sổ thời gian (mặc định
+        $30$~phút) lên phạm vi bao trùm đợt tấn công, hoặc chạy lại kịch bản tấn công
+        ở mục~\ref{app:demo-attack} ngay trước khi xem để có nhật ký cảnh báo trong cửa sổ.
+  \item \textbf{Bảng \emph{Incidents \& Actions} (nguồn Prometheus).} Các bộ đếm
+        (\texttt{zt\_incidents\_created\_total}, \texttt{zt\_aggregator\_active\_incidents}
+        \ldots) chỉ hiển thị khi Prometheus thật sự thu thập điểm \texttt{/metrics} của
+        dịch vụ SOC. Cụm dùng Prometheus Operator (kube-prometheus-stack), vốn khám phá
+        mục tiêu qua \texttt{ServiceMonitor} chứ không qua chú thích
+        \texttt{prometheus.io/scrape}; vì vậy cần khai báo một \texttt{ServiceMonitor} cho
+        các dịch vụ SOC (kèm nhãn \texttt{release} mà Operator chọn). Ngoài ra các bộ đếm
+        là biến đếm trong tiến trình~--~bị đặt lại $0$ mỗi khi pod khởi động lại~--~nên
+        chúng phản ánh hoạt động \emph{kể từ lần khởi động gần nhất}, không phải lịch sử.
+\end{enumerate}
+
+\noindent Đây cũng là một giới hạn quan trắc được bàn ở Chương~\ref{ch:eval}: cơ sở dữ
+liệu là nguồn dữ liệu bền vững và là hệ thống ghi nhận chính thức của các số liệu sự cố;
+dashboard là lớp quan trắc thời gian thực bổ trợ.

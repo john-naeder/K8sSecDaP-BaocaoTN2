@@ -1,0 +1,57 @@
+# =============================================================================
+# ARGO CD APPLICATIONSET — multi-cluster root generator.
+# =============================================================================
+# For each `clusters/*/config.yaml` file present in this repo, generate one
+# root Application that points at the path the config selects. This is the
+# fleet-friendly replacement for app-of-apps.yaml when more than one cluster
+# is registered with Argo CD.
+#
+# Registering a cluster:
+#   argocd cluster add <kube-context-name>
+# or apply a `Secret` of type cluster (see Argo CD docs).
+#
+# Adding GKE (or any new cluster) then becomes 3 git operations:
+#   1. argocd cluster add gke-bc2
+#   2. cp clusters/gke/config.yaml.example clusters/gke/config.yaml
+#      (edit cluster.server)
+#   3. git commit + push
+# =============================================================================
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: cluster-roots
+  namespace: argocd
+spec:
+  goTemplate: true
+  goTemplateOptions:
+    - missingkey=error
+  generators:
+    - git:
+        repoURL: git@github.com:john-naeder/K8sSecDaP-deploy.git
+        revision: master
+        files:
+          - path: platform/argocd/clusters/*/config.yaml
+  template:
+    metadata:
+      name: '{{ .cluster.name }}-platform'
+      namespace: argocd
+      finalizers:
+        - resources-finalizer.argocd.argoproj.io
+      annotations:
+        argocd.argoproj.io/manifest-generate-paths: '{{ .cluster.rootPath }}'
+    spec:
+      project: default
+      source:
+        repoURL: git@github.com:john-naeder/K8sSecDaP-deploy.git
+        targetRevision: main
+        path: '{{ .cluster.rootPath }}'
+      destination:
+        server: '{{ .cluster.server }}'
+        namespace: argocd
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        syncOptions:
+          - CreateNamespace=true
+          - ApplyOutOfSyncOnly=true

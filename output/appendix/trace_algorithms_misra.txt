@@ -1,0 +1,56 @@
+===============================================================
+  MISRA-GRIES (Heavy Hitters)  —  step-by-step trace
+===============================================================
+Parameter : k = 3 (at most 2 active counters)
+Guarantees: f_hat(x) <= f(x)     (underestimate)
+            f(x) - f_hat(x) <= m / k
+
+Stream S = [ a, b, a, c, a, b, d, a ]
+Length m = 8
+
+Step 1: INSERT "a"
+    "a" not in T, |T| = 0 < k-1 = 2   -> add with count 1
+    T = { a:1 }
+
+Step 2: INSERT "b"
+    "b" not in T, |T| = 1 < k-1 = 2   -> add with count 1
+    T = { a:1, b:1 }
+
+Step 3: INSERT "a"
+    "a" in T   -> increment counter
+    T = { a:2, b:1 }
+
+Step 4: INSERT "c"
+    "c" not in T and |T| = 2 = k-1 = 2   -> DECREMENT ALL
+      before: T = { a:2, b:1 }
+      after : T = { a:1 }
+    T = { a:1 }
+
+Step 5: INSERT "a"
+    "a" in T   -> increment counter
+    T = { a:2 }
+
+Step 6: INSERT "b"
+    "b" not in T, |T| = 1 < k-1 = 2   -> add with count 1
+    T = { a:2, b:1 }
+
+Step 7: INSERT "d"
+    "d" not in T and |T| = 2 = k-1 = 2   -> DECREMENT ALL
+      before: T = { a:2, b:1 }
+      after : T = { a:1 }
+    T = { a:1 }
+
+Step 8: INSERT "a"
+    "a" in T   -> increment counter
+    T = { a:2 }
+
+--- QUERIES ---
+    key       f(x)    f_hat(x)     f - f_hat  <= m/k?
+    "a"          4           2             2       yes
+    "b"          2           0             2       yes
+    "c"          1           0             1       yes
+    "d"          1           0             1       yes
+    "e"          0           0             0       yes
+
+Observation: for every key, f_hat(x) <= f(x) — underestimate.
+              error gap never exceeds m/k = 2.

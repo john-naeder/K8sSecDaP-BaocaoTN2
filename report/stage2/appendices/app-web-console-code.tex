@@ -1,0 +1,43 @@
+\chapter{Mã nguồn lõi: Console web (Flask + HTMX)}
+\label{app:web-console}
+
+Console web (kho \texttt{K8sSecDaP-soc}, dịch vụ \texttt{web-console}) là một lớp giao
+diện mỏng đặt trước REST API của dịch vụ sự cố. Mọi lời gọi xuống API đều kèm token
+admin phía máy chủ (\texttt{RBAC\_ADMIN\_TOKEN}); trình duyệt chỉ xác thực bằng Basic
+Auth và không bao giờ giữ token API.
+
+\begin{lstlisting}[language=Python,caption={Các route nghiệp vụ chính của console (\texttt{app.py}).}]
+def _api(method, path, **kwargs):
+    """Goi REST API cua incident-service voi tu cach SOC admin token."""
+    headers = kwargs.pop("headers", {})
+    headers["Authorization"] = f"Bearer {ADMIN_TOKEN}"
+    return requests.request(method, INCIDENT_API + path, headers=headers,
+                            timeout=REQUEST_TIMEOUT, **kwargs)
+
+@app.get("/")
+@_require_basic_auth
+def index():
+    incidents = _api("GET", "/api/v1/incidents?limit=50").json() or []
+    actions   = _api("GET", "/api/v1/actions?status=pending&limit=50").json() or []
+    return render_template("incidents.html", incidents=incidents, actions=actions)
+
+@app.get("/incidents/<int:inc_id>")
+@_require_basic_auth
+def incident_detail(inc_id):
+    inc     = _api("GET", f"/api/v1/incidents/{inc_id}").json()
+    audit   = _api("GET", f"/api/v1/incidents/{inc_id}/audit?limit=100").json() or []
+    actions = _api("GET", "/api/v1/actions?limit=200").json() or []
+    related = [a for a in actions if a.get("incident_id") == inc_id]
+    return render_template("incident_detail.html", incident=inc,
+                           actions=related, audit=audit)
+
+@app.post("/actions/<int:action_id>/approve")   # HTMX: thay 1 hang, khong tai lai trang
+@_require_basic_auth
+def approve_action(action_id):
+    resp = _api("POST", f"/api/v1/actions/{action_id}/approve")
+    return _htmx_action_row(resp.json())
+\end{lstlisting}
+
+Việc phê duyệt/bác bỏ dùng HTMX để thay \emph{một hàng} hành động trong bảng mà không
+tải lại toàn trang (\texttt{\_action\_row.html}), giúp thao tác duyệt phản hồi nhanh và
+liền mạch cho người vận hành.

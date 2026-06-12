@@ -1,0 +1,102 @@
+# Zero-Trust SOC stack — the BC2 application itself, managed by Argo CD
+# the same way as platform apps. Three child Applications keep ordering
+# explicit (CNI must exist before SOC pods request pod-network, MinIO/data
+# layer must exist before incident-service writes weekly reports).
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: zt-cni-calico
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+  annotations:
+    argocd.argoproj.io/sync-wave: "-10"
+spec:
+  project: default
+  source:
+    repoURL: git@github.com:john-naeder/K8sSecDaP-deploy.git
+    targetRevision: main
+    path: cni/calico
+    directory:
+      include: 'calico-custom.yaml'
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: tigera-operator
+  syncPolicy:
+    automated:
+      prune: false              # NEVER auto-prune CNI
+      selfHeal: false
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+  # tigera-operator backfills these fields with defaults after apply.
+  # Listing the changes Argo CD should ignore (instead of /spec wholesale)
+  # keeps real drift in Git-tracked fields detectable.
+  ignoreDifferences:
+    - group: operator.tigera.io
+      kind: Installation
+      jsonPointers:
+        - /spec/calicoNetwork/hostPorts
+        - /spec/calicoNetwork/linuxDataplane
+        - /spec/calicoNetwork/linuxPolicySetupTimeoutSeconds
+        - /spec/calicoNetwork/multiInterfaceMode
+        - /spec/calicoNetwork/windowsDataplane
+        - /spec/calicoNetwork/ipPools/0/disableBGPExport
+        - /spec/cni
+        - /spec/controlPlaneReplicas
+        - /spec/flexVolumePath
+        - /spec/kubeletVolumePluginPath
+        - /spec/logging
+        - /spec/nodeUpdateStrategy
+        - /spec/nonPrivileged
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: zt-soc-core
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+spec:
+  project: default
+  source:
+    repoURL: git@github.com:john-naeder/K8sSecDaP-soc.git
+    targetRevision: main
+    path: manifests
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: soc
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: zt-soc-data
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+  annotations:
+    argocd.argoproj.io/sync-wave: "10"
+spec:
+  project: default
+  source:
+    repoURL: git@github.com:john-naeder/K8sSecDaP-soc.git
+    targetRevision: main
+    path: data
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: soc
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

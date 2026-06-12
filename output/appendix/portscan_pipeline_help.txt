@@ -1,0 +1,15 @@
+Usage: build/bin/portscan-pipeline [options]
+
+Options:
+  --algo {cms|mg|hashmap|all}  Thuật toán dùng (mặc định: all)
+  --input PATH                 File JSON Lines, mặc định đọc stdin
+  --trace-dir DIR              Ghi trace_<algo>.txt vào DIR
+  --alerts PATH                Ghi alerts.json vào PATH
+  --comparison PATH            Ghi comparison.csv (cần --algo all)
+  --cms-width N                CMS width  (mặc định 2048)
+  --cms-depth N                CMS depth  (mặc định 5)
+  --mg-k N                     MG slots   (mặc định 64)
+  --threshold N                Ngưỡng alert (mặc định 40)
+  --window-seconds N           Cửa sổ tumbling (mặc định 60)
+  --trace-at LIST              CSV các event_index sinh snapshot
+                               (mặc định 50,100,110,120,130,140)

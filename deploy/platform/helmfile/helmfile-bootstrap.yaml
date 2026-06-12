@@ -1,0 +1,73 @@
+# =============================================================================
+# HELMFILE — bootstrap minimal platform so ArgoCD can manage everything else.
+# =============================================================================
+#
+# Run:
+#   helmfile -f helmfile-bootstrap.yaml diff   # preview
+#   helmfile -f helmfile-bootstrap.yaml apply  # idempotent
+#   helmfile -f helmfile-bootstrap.yaml list
+#
+# Install order (strict dependency):
+#   1. cert-manager     — TLS foundation
+#   2. traefik          — Ingress controller (cần cert-manager)
+#   3. sealed-secrets   — encrypt secrets in Git (cần trước ArgoCD)
+#   4. argocd           — GitOps controller (manages everything else)
+#
+# Post-bootstrap (manual or via app-of-apps):
+#   kubectl apply -f ../argocd/app-of-apps.yaml
+#
+# Pre-requisites:
+#   - K8s cluster reachable (BC2 expects Calico CNI — see deploy/cni/calico/)
+#   - helm + helmfile + helm-diff plugin installed
+# =============================================================================
+
+helmDefaults:
+  wait: true
+  waitForJobs: true
+  timeout: 600
+  cleanupOnFail: true
+  createNamespace: true
+
+repositories:
+  - name: jetstack
+    url: https://charts.jetstack.io
+  - name: traefik
+    url: https://traefik.github.io/charts
+  - name: sealed-secrets
+    url: https://bitnami-labs.github.io/sealed-secrets
+  - name: argo
+    url: https://argoproj.github.io/argo-helm
+
+releases:
+  - name: cert-manager
+    namespace: cert-manager
+    chart: jetstack/cert-manager
+    version: "1.16.3"
+    values:
+      - values/cert-manager.yaml
+
+  - name: traefik
+    namespace: traefik
+    chart: traefik/traefik
+    version: "34.3.0"
+    needs:
+      - cert-manager/cert-manager
+    values:
+      - values/traefik.yaml
+
+  - name: sealed-secrets
+    namespace: sealed-secrets
+    chart: sealed-secrets/sealed-secrets
+    version: "2.17.1"
+    values:
+      - values/sealed-secrets.yaml
+
+  - name: argocd
+    namespace: argocd
+    chart: argo/argo-cd
+    version: "7.8.7"
+    needs:
+      - traefik/traefik
+      - sealed-secrets/sealed-secrets
+    values:
+      - values/argocd.yaml

@@ -1,0 +1,35 @@
+% Luu do sinh & ap NetworkPolicy (generate-for-review). Chuong 4.
+\begin{tikzpicture}[font=\footnotesize, >={Stealth[length=2.2mm]}, node distance=0.62cm,
+    io/.style  ={draw, rounded corners=7pt, fill=blue!10, align=center,
+                 minimum width=5.2cm, minimum height=0.66cm},
+    proc/.style={draw, fill=gray!8, align=center, minimum width=5.2cm, minimum height=0.66cm},
+    gw/.style  ={draw, diamond, aspect=2.2, fill=yellow!22, align=center,
+                 inner sep=1pt, minimum width=3.2cm},
+    term/.style={draw, rounded corners=7pt, fill=green!14, align=center,
+                 minimum width=2.8cm, minimum height=0.6cm},
+    flow/.style={->, thick},
+  ]
+  \node[io]   (alert)  {Cảnh báo \texttt{port\_scan} (qua NATS)};
+  \node[proc, below=of alert]  (inc)    {Tạo sự cố (\texttt{incident-service})};
+  \node[proc, below=of inc]    (enrich) {Làm giàu: \texttt{src\_ip} $\rightarrow$ pod (tên, namespace)};
+  \node[proc, below=of enrich] (gen)    {Sinh bản nháp \texttt{NetworkPolicy} egress-deny\\gắn nhãn cách ly lên đúng pod};
+  \node[gw,   below=0.7cm of gen] (appr) {Người vận hành\\duyệt?};
+  \node[proc, below=0.78cm of appr] (apply)  {Áp policy qua K8s API (Calico thực thi)};
+  \node[proc, below=of apply]  (verify) {Xác minh: pod tấn công mất kết nối đi ra};
+  \node[term, below=of verify] (done)   {Ghi nhật ký kiểm toán};
+  \node[proc, right=1.5cm of appr] (reject) {Ghi kiểm toán \& tiếp tục theo dõi};
+
+  \draw[flow] (alert)--(inc);   \draw[flow] (inc)--(enrich);
+  \draw[flow] (enrich)--(gen);  \draw[flow] (gen)--(appr);
+  \draw[flow] (appr)-- node[right]{đồng ý} (apply);
+  \draw[flow] (apply)--(verify); \draw[flow] (verify)--(done);
+  \draw[flow] (appr)-- node[above]{từ chối} (reject);
+
+  % Chu thich ky thuat ve egress-deny
+  \node[draw, dashed, fill=red!4, align=left, font=\scriptsize, text width=4.0cm,
+        left=1.4cm of gen] (note)
+    {\textbf{Vì sao egress-deny?} Ngữ nghĩa \emph{cộng dồn} của NetworkPolicy khiến luật
+     ``cho phép mọi nguồn trừ một'' không chặn được khi còn luật cho-phép rộng khác; phải
+     chặn \emph{lối ra} của chính pod tấn công.};
+  \draw[->, red!60, dashed] (note) -- (gen);
+\end{tikzpicture}

@@ -1,0 +1,125 @@
+# soc-incident-service: REST API + NATS subscriber that turns alerts into
+# managed incidents stored in Postgres.
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: incident-rbac-tokens
+  namespace: soc
+type: Opaque
+stringData:
+  # Format: user:role:token  (comma-separated). Demo defaults — rotate in prod.
+  RBAC_TOKENS: |
+    viewer-demo:viewer:viewer-demo-token,editor-demo:editor:editor-demo-token,admin-demo:admin:admin-demo-token
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: netpol-drafts
+  namespace: soc
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests: { storage: 1Gi }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: zt-incident-service
+  namespace: soc
+  labels:
+    app.kubernetes.io/name: zt-incident-service
+    app.kubernetes.io/component: incident-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app.kubernetes.io/name: zt-incident-service }
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: zt-incident-service
+        app.kubernetes.io/component: incident-service
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9101"
+    spec:
+      serviceAccountName: zt-incident-service
+      containers:
+        - name: incident-service
+          image: johnnaeder/zt-incident-service:v0.4
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: DATABASE_URL
+              value: "postgres://soc:soc-demo-password@postgres.soc.svc.cluster.local:5432/soc?sslmode=disable"
+            - name: NATS_URL
+              value: "nats://nats.soc.svc.cluster.local:4222"
+            - name: NATS_SUBJECT
+              value: "zt.alerts.enriched"
+            - name: APPLY_MODE
+              value: "apply"
+            - name: DRAFT_DIR
+              value: "/var/lib/zt/netpol-drafts"
+            - name: LISTEN_ADDR
+              value: ":8080"
+            - name: METRICS_ADDR
+              value: ":9101"
+            # Email notifier — points at MailHog in-cluster (deploy/soc/15-mailhog.yaml).
+            - name: SMTP_HOST
+              value: "mailhog.soc.svc.cluster.local"
+            - name: SMTP_PORT
+              value: "1025"
+            - name: SMTP_FROM
+              value: "zt-soc@cluster.local"
+            - name: SMTP_TO
+              value: "duymt7356@gmail.com"
+            - name: WEB_CONSOLE_URL
+              value: "http://web-console.soc.svc.cluster.local:5000"
+            # MinIO sink for weekly report upload (Phase D).
+            - name: MINIO_ENDPOINT
+              value: "minio.soc.svc.cluster.local:9000"
+            - name: MINIO_REGION
+              value: "us-east-1"
+            - name: MINIO_ACCESS_KEY
+              valueFrom: { secretKeyRef: { name: minio-creds, key: MINIO_ROOT_USER } }
+            - name: MINIO_SECRET_KEY
+              valueFrom: { secretKeyRef: { name: minio-creds, key: MINIO_ROOT_PASSWORD } }
+          envFrom:
+            - secretRef: { name: incident-rbac-tokens }
+          ports:
+            - { containerPort: 8080, name: http }
+            - { containerPort: 9101, name: metrics }
+          volumeMounts:
+            - { name: drafts, mountPath: /var/lib/zt/netpol-drafts }
+          readinessProbe:
+            httpGet: { path: /ready, port: http }
+            periodSeconds: 5
+            initialDelaySeconds: 5
+          livenessProbe:
+            httpGet: { path: /health, port: http }
+            periodSeconds: 30
+          resources:
+            requests: { cpu: 100m, memory: 128Mi }
+            limits:   { cpu: 1,    memory: 512Mi }
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65532
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+            seccompProfile: { type: RuntimeDefault }
+      volumes:
+        - name: drafts
+          persistentVolumeClaim: { claimName: netpol-drafts }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: zt-incident-service
+  namespace: soc
+  labels:
+    app.kubernetes.io/name: zt-incident-service
+spec:
+  selector: { app.kubernetes.io/name: zt-incident-service }
+  ports:
+    - { name: http,    port: 8080, targetPort: http }
+    - { name: metrics, port: 9101, targetPort: metrics }

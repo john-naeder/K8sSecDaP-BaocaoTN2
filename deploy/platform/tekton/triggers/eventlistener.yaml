@@ -1,0 +1,60 @@
+# =============================================================================
+# Tekton EventListener — receives GitHub webhook events
+# =============================================================================
+#
+# When GitHub sends a push event, the EventListener:
+#   1. Receives the POST request
+#   2. Matches it against TriggerBindings (extract params)
+#   3. Creates a PipelineRun via TriggerTemplate
+#
+# The EventListener automatically creates a Service: el-github-listener
+# which we expose via Traefik IngressRoute + cloudflared.
+#
+# Expose URL: https://tekton.kythuat.vn
+# =============================================================================
+apiVersion: triggers.tekton.dev/v1beta1
+kind: EventListener
+metadata:
+  name: github-listener
+  namespace: tekton-pipelines
+  labels:
+    app.kubernetes.io/part-of: slsa-pipeline
+spec:
+  serviceAccountName: tekton-triggers-sa
+  triggers:
+    - name: github-push-ingress-config
+      interceptors:
+        - ref:
+            name: "cel"
+          params:
+            - name: "filter"
+              value: >-
+                body.repository.name == 'gitops-manifests' &&
+                body.ref == 'refs/heads/main' &&
+                !body.head_commit.message.startsWith('[skip ci]') &&
+                body.commits.exists(c,
+                  c.modified.exists(f, f.startsWith('config/ingress/')) ||
+                  c.added.exists(f, f.startsWith('config/ingress/')) ||
+                  c.removed.exists(f, f.startsWith('config/ingress/'))
+                )
+      bindings:
+        - ref: github-push-ingress-binding
+      template:
+        ref: ingress-sync-template
+  resources:
+    kubernetesResource:
+      spec:
+        template:
+          spec:
+            serviceAccountName: tekton-triggers-sa
+            nodeSelector:
+              kubernetes.io/hostname: userver-home-worker
+            containers:
+              - name: event-listener
+                resources:
+                  requests:
+                    cpu: 100m
+                    memory: 128Mi
+                  limits:
+                    cpu: 300m
+                    memory: 256Mi

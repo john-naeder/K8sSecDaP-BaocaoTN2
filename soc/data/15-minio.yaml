@@ -1,0 +1,109 @@
+# MinIO single-node — object storage sink for backups, weekly reports,
+# PCAP dumps, and NetworkPolicy draft archives. Demo-scale (1 replica,
+# 20Gi PVC). Buckets pre-created by an initContainer running `mc`.
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: minio-creds
+  namespace: soc
+type: Opaque
+stringData:
+  MINIO_ROOT_USER: zt-soc-admin
+  MINIO_ROOT_PASSWORD: zt-soc-demo-minio-password
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: minio-data
+  namespace: soc
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests: { storage: 20Gi }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: minio
+  namespace: soc
+  labels:
+    app.kubernetes.io/name: minio
+    app.kubernetes.io/part-of: zero-trust-mapper
+spec:
+  replicas: 1
+  strategy: { type: Recreate }   # PVC is RWO; no rolling upgrade
+  selector:
+    matchLabels: { app.kubernetes.io/name: minio }
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: minio
+    spec:
+      containers:
+        # Sidecar (NOT initContainer) — needs to talk to its sibling
+        # `minio` container on 127.0.0.1:9000, which can't exist while
+        # init containers run. The sidecar keeps polling, provisions
+        # buckets on the first success, then loops harmlessly on `sleep`.
+        - name: provision-buckets
+          image: quay.io/minio/mc:RELEASE.2024-09-16T17-43-14Z
+          envFrom:
+            - secretRef: { name: minio-creds }
+          command:
+            - sh
+            - -c
+            - |
+              set -e
+              until mc alias set local http://127.0.0.1:9000 "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD"; do
+                echo "waiting for minio..."; sleep 2
+              done
+              for b in zt-postgres-backups zt-reports zt-pcap-dumps zt-netpol-archives; do
+                mc mb --ignore-existing "local/$b"
+              done
+              mc anonymous set download local/zt-reports || true
+              echo "buckets provisioned"
+              # Keep the sidecar alive so the pod doesn't restart in a
+              # loop — minio is the long-lived container.
+              tail -f /dev/null
+          resources:
+            requests: { cpu: 10m, memory: 16Mi }
+            limits:   { memory: 64Mi }
+        - name: minio
+          image: quay.io/minio/minio:RELEASE.2024-09-13T20-26-02Z
+          args: ["server", "/data", "--console-address", ":9001"]
+          envFrom:
+            - secretRef: { name: minio-creds }
+          ports:
+            - { containerPort: 9000, name: api }
+            - { containerPort: 9001, name: console }
+          readinessProbe:
+            httpGet: { path: /minio/health/ready, port: api }
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: { path: /minio/health/live, port: api }
+            periodSeconds: 30
+          resources:
+            requests: { cpu: 100m, memory: 256Mi }
+            limits:   { cpu: 1,    memory: 1Gi }
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            allowPrivilegeEscalation: false
+            capabilities: { drop: ["ALL"] }
+            seccompProfile: { type: RuntimeDefault }
+          volumeMounts:
+            - { name: data, mountPath: /data }
+      volumes:
+        - name: data
+          persistentVolumeClaim: { claimName: minio-data }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: minio
+  namespace: soc
+spec:
+  selector: { app.kubernetes.io/name: minio }
+  ports:
+    - { name: api,     port: 9000, targetPort: api }
+    - { name: console, port: 9001, targetPort: console }

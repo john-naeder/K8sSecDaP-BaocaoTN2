@@ -1,0 +1,40 @@
+# =============================================================================
+# Cloudflare Tunnel ingress map (template). Configure these hostnames in
+# Cloudflare Zero Trust → Networks → Tunnels → <your tunnel> → Public Hostnames.
+# This file documents the intended mapping; the actual rules live in the
+# Cloudflare control plane, not on the cluster.
+# =============================================================================
+tunnel: zt-bc2-tunnel
+credentials-file: /etc/cloudflared/creds.json
+
+ingress:
+  - hostname: argocd.zt.local
+    service: https://argocd-server.argocd.svc.cluster.local:443
+    originRequest:
+      noTLSVerify: true        # ArgoCD self-signed inside cluster
+
+  - hostname: grafana.zt.local
+    service: http://kube-prometheus-grafana.monitoring.svc.cluster.local:80
+
+  - hostname: harbor.zt.local
+    service: http://harbor.harbor.svc.cluster.local:80
+
+  - hostname: rancher.zt.local
+    service: https://rancher.cattle-system.svc.cluster.local:443
+    originRequest:
+      noTLSVerify: true
+
+  - hostname: nexus.zt.local
+    service: http://nexus-sonatype-nexus.nexus.svc.cluster.local:8081
+
+  - hostname: web-console.zt.local
+    service: http://web-console.soc.svc.cluster.local:5000
+
+  - hostname: mailhog.zt.local
+    service: http://mailhog.soc.svc.cluster.local:8025
+
+  - hostname: uptime.zt.local
+    service: http://uptime-kuma.monitoring.svc.cluster.local:3001
+
+  # Default catch-all — return 404 instead of routing to cluster.
+  - service: http_status:404

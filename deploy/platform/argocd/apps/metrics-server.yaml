@@ -1,0 +1,66 @@
+# metrics-server — Resource Metrics API for `kubectl top` + HPA.
+# --kubelet-insecure-tls is required on kubeadm clusters where the kubelet
+# serves a self-signed cert; without it metrics-server fails with x509.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: metrics-server
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    chart: metrics-server
+    repoURL: https://kubernetes-sigs.github.io/metrics-server
+    targetRevision: "3.12.2"
+    helm:
+      releaseName: metrics-server
+      valuesObject:
+        # Override chart defaultArgs entirely so duplicate flags don't
+        # show up in the rendered command line — Go flag parsing keeps
+        # the first occurrence, so a duplicate --metric-resolution=15s
+        # was beating our 30s override.
+        defaultArgs:
+          - --cert-dir=/tmp
+          - --kubelet-preferred-address-types=InternalIP,ExternalIP,Hostname
+          - --kubelet-use-node-status-port
+          # worker-home rides DERP relay (~70-180ms RTT, occasional 1-3s
+          # spikes when the relay re-handshakes). Default 10s timeout
+          # fails ~50% of the time → NodeMetrics for that node disappears
+          # from the Resource Metrics API. 30s covers the relay re-handshake.
+          - --kubelet-request-timeout=30s
+          # metric-resolution must be strictly > kubelet-request-timeout
+          # (the server panics otherwise). 60s is fine for a lab cluster
+          # and keeps `kubectl top` responsive enough.
+          - --metric-resolution=60s
+        args:
+          - --kubelet-insecure-tls
+        resources:
+          requests: { cpu: 25m, memory: 64Mi }
+          limits:   { memory: 128Mi }
+        # Keep metrics-server off worker-home: that node flaps every few
+        # minutes and the pod gets stuck ContainerCreating when scheduled
+        # there, while the old replica from the previous rollout keeps
+        # running with stale args. Pin away.
+        affinity:
+          nodeAffinity:
+            # Hard exclude — soft preference (weight=100) wasn't enough,
+            # scheduler still landed the pod there during rollout because
+            # the old replica held the only stable slot. NodeMetrics
+            # disappeared as a result.
+            requiredDuringSchedulingIgnoredDuringExecution:
+              nodeSelectorTerms:
+                - matchExpressions:
+                    - key: kubernetes.io/hostname
+                      operator: NotIn
+                      values: ["userver-worker-home"]
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: kube-system
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - ServerSideApply=true

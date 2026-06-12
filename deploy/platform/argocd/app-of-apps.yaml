@@ -1,0 +1,36 @@
+# =============================================================================
+# ARGO CD — APP-OF-APPS ROOT
+# =============================================================================
+# Bootstrap apply once after helmfile-bootstrap.yaml has Argo CD running:
+#   kubectl apply -f platform/argocd/app-of-apps.yaml
+#
+# Argo CD then reads platform/argocd/apps/ and creates one Application
+# per file. Subsequent changes flow through Git only.
+#
+# For fleet/multi-cluster (BC2 + future GKE): use ApplicationSet at
+# platform/argocd/appsets/cluster-roots.yaml instead — it generates
+# this same root per registered cluster from clusters/*/config.yaml.
+# =============================================================================
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: platform-apps
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: git@github.com:john-naeder/K8sSecDaP-deploy.git
+    targetRevision: main
+    path: platform/argocd/apps
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ApplyOutOfSyncOnly=true

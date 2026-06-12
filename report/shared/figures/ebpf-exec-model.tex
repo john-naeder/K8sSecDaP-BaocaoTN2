@@ -1,0 +1,37 @@
+% Mo hinh thuc thi eBPF: bien dich -> nap -> verifier -> JIT -> gan hook + maps. Chuong 2.
+\begin{tikzpicture}[font=\footnotesize, node distance=0.6cm and 1.2cm,
+    box/.style ={draw, rounded corners=2pt, align=center, minimum height=0.85cm,
+                 minimum width=2.9cm},
+    us/.style  ={box, fill=blue!10},
+    kn/.style  ={box, fill=green!12},
+    map/.style ={draw, rounded corners=2pt, fill=orange!16, align=center,
+                 minimum height=1.0cm, minimum width=2.7cm},
+    flow/.style={-{Stealth[length=2mm]}, thick},
+  ]
+  % --- Khong gian nguoi dung (trai) ---
+  \node[us] (src) {Mã nguồn C\\(\texttt{*.bpf.c})};
+  \node[us, below=of src] (clang) {clang/LLVM\\$\rightarrow$ bytecode BPF};
+  \node[us, below=of clang] (loader) {libbpf loader\\(\texttt{bpf()} syscall)};
+  \node[draw, dashed, fit=(src)(clang)(loader), inner sep=8pt,
+        label=above:{\textbf{Không gian người dùng}}] (ubox) {};
+
+  % --- Nhan Linux (phai): chuoi doc verifier -> jit -> hook; maps ben phai hook ---
+  \node[kn, right=2.6cm of src] (verif) {Verifier\\(kiểm chứng an toàn:\\dừng, giới hạn bộ nhớ)};
+  \node[kn, below=of verif] (jit) {JIT compiler\\$\rightarrow$ mã máy gốc};
+  \node[kn, below=of jit] (hook) {Chương trình eBPF (đã JIT)\\gắn tại \texttt{kprobe}};
+  \node[map, right=1.1cm of hook] (maps) {BPF maps\\(LPM\_TRIE,\\RINGBUF, HASH)};
+  \node[draw, dashed, fit=(verif)(jit)(hook)(maps), inner sep=9pt,
+        label=above:{\textbf{Nhân Linux}}] (kbox) {};
+
+  % Luong chinh
+  \draw[flow] (src) -- (clang);
+  \draw[flow] (clang) -- (loader);
+  \draw[flow] (loader.east) -- ++(0.45,0) |- (verif.west);   % nap vao verifier
+  \draw[flow] (verif) -- node[right, font=\scriptsize]{đạt} (jit);
+  \draw[flow] (jit) -- (hook);
+  \draw[flow, {Stealth}-{Stealth}] (hook) -- (maps);          % chuong trinh <-> maps
+  % Bi loai neu khong an toan (do, dut net) quay ve loader
+  \draw[flow, red, dashed] (verif.west) to[bend left=18] ($(loader.east)+(0.25,0.35)$);
+  \node[red, font=\scriptsize, align=center] at ($(verif.west)!0.5!(loader.east)+(0,0.62)$)
+    {bị loại nếu\\không an toàn};
+\end{tikzpicture}

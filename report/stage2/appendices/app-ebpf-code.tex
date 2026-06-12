@@ -1,0 +1,66 @@
+\chapter{Mã nguồn lõi: chương trình eBPF nhân và bộ đọc tầng người dùng}
+\label{app:ebpf}
+
+Phụ lục này trích dẫn mã nguồn cốt lõi của bộ thu thập (kho \texttt{K8sSecDaP-collector}).
+Phần thân của \texttt{kretprobe}, bảng nạp CIDR và phần khai báo \texttt{DaemonSet} đã
+được trình bày trong Chương~\ref{ch:impl}; ở đây bổ sung phần \emph{khai báo ba BPF map}
+và \texttt{kprobe} lúc vào, cùng trình tự \emph{nạp/gắn} ở tầng người dùng.
+
+\section{Khai báo BPF map và kprobe lúc vào (\texttt{tcp\_connect.bpf.c})}
+
+\begin{lstlisting}[language=C,caption={Ba BPF map và kprobe lúc vào (\texttt{tcp\_v4\_connect}).}]
+struct network_event_t {                 // phai trung khop common.h o tang user
+    __u32 src_ip; __u32 dst_ip; __u16 dst_port; __u32 pid; __u64 timestamp_ns;
+};
+struct lpm_key { __u32 prefixlen; __u32 addr; };
+
+// LPM Trie: tien to CIDR -> nhan (1=pod, 2=svc, 3=node, 0=external).
+struct {
+    __uint(type, BPF_MAP_TYPE_LPM_TRIE);
+    __type(key, struct lpm_key); __type(value, __u32);
+    __uint(max_entries, 1024);
+    __uint(map_flags, BPF_F_NO_PREALLOC);   // BAT BUOC cho LPM_TRIE
+} cidr_map SEC(".maps");
+
+// Ring buffer truyen su kien len user space (256 KiB, page-aligned).
+struct {
+    __uint(type, BPF_MAP_TYPE_RINGBUF);
+    __uint(max_entries, 256 * 1024);
+} events SEC(".maps");
+
+// Luu con tro sock giua kprobe (entry) va kretprobe (return), khoa theo pid_tgid.
+struct {
+    __uint(type, BPF_MAP_TYPE_HASH);
+    __type(key, __u64); __type(value, struct sock *);
+    __uint(max_entries, 4096);
+} sock_store SEC(".maps");
+
+SEC("kprobe/tcp_v4_connect")
+int BPF_KPROBE(tcp_v4_connect_entry, struct sock *sk)
+{
+    __u64 pid_tgid = bpf_get_current_pid_tgid();
+    bpf_map_update_elem(&sock_store, &pid_tgid, &sk, BPF_ANY);
+    return 0;
+}
+char LICENSE[] SEC("license") = "GPL";
+\end{lstlisting}
+
+\section{Trình tự nạp và gắn ở tầng người dùng (\texttt{collector.cpp})}
+
+\begin{lstlisting}[language=C++,caption={Nạp tệp đối tượng BPF, gắn probe, vào vòng đọc ring buffer.}]
+struct bpf_object *obj = bpf_object__open_file("tcp_connect.bpf.o", nullptr);
+bpf_object__load(obj);                                  // nap BPF vao kernel
+auto *kp  = bpf_object__find_program_by_name(obj, "tcp_v4_connect_entry");
+auto *krp = bpf_object__find_program_by_name(obj, "tcp_v4_connect_return");
+bpf_program__attach(kp);                                // gan kprobe
+bpf_program__attach(krp);                               // gan kretprobe
+populate_cidr_map(bpf_map__fd(bpf_object__find_map_by_name(obj, "cidr_map")));
+auto *rb = ring_buffer__new(bpf_map__fd(events_map), handle_event, nullptr, nullptr);
+while (!exiting)                                         // vong su kien chinh
+    ring_buffer__poll(rb, 100 /* timeout_ms */);
+\end{lstlisting}
+
+Hàm callback \texttt{handle\_event} đổi địa chỉ nhị phân sang chuỗi chấm-thập phân và in
+một dòng JSON cho mỗi sự kiện; bộ đệm vòng (\texttt{BPF\_MAP\_TYPE\_RINGBUF}) được chọn
+thay cho perf buffer vì cho thông lượng cao hơn, không trùng lặp và giữ đúng thứ tự sự
+kiện giữa các CPU.

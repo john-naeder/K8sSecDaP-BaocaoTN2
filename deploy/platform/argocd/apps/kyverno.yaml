@@ -1,0 +1,83 @@
+# Kyverno — admission policy engine. Engine ships from upstream Helm chart;
+# the active policy set lives at platform/argocd/policies/ and is
+# loaded by the kyverno-policies Application below.
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: kyverno
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    chart: kyverno
+    repoURL: https://kyverno.github.io/kyverno
+    targetRevision: "3.3.7"
+    helm:
+      releaseName: kyverno
+      valuesObject:
+        replicaCount: 1
+        features:
+          registryClient:
+            allowInsecure: true       # tolerate Harbor self-signed cert
+        admissionController:
+          replicas: 1
+          resources:
+            requests: { cpu: 50m, memory: 64Mi }
+            limits:   { memory: 256Mi }
+        backgroundController:
+          enabled: true
+          resources:
+            requests: { cpu: 25m, memory: 64Mi }
+            limits:   { memory: 128Mi }
+        cleanupController: { enabled: true }
+        reportsController: { enabled: true }
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: kyverno
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+      - SkipDryRunOnMissingResource=true
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: kyverno-policies
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: git@github.com:john-naeder/K8sSecDaP-deploy.git
+    targetRevision: main
+    path: platform/argocd/policies
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: kyverno
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+  # Kyverno v1.13+ admission webhook injects defaults at admission time
+  # on every ClusterPolicy. Ignore the injected fields so Argo CD doesn't
+  # fight the webhook (admission/emitWarning on spec, and per-rule
+  # skipBackgroundRequests + validate.allowExistingViolations).
+  ignoreDifferences:
+    - group: kyverno.io
+      kind: ClusterPolicy
+      jqPathExpressions:
+        - .spec.admission
+        - .spec.emitWarning
+        - .spec.rules[].skipBackgroundRequests
+        - .spec.rules[].validate.allowExistingViolations

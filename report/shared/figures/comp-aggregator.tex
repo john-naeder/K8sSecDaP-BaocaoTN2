@@ -1,0 +1,13 @@
+%% Component diagram noi bo: aggregator (khop voi correlator.go/main.go). Chuong 3.
+\begin{tikzpicture}[font=\footnotesize, >={Stealth[length=2mm]},
+    mod/.style={draw, rounded corners=2pt, fill=blue!8, align=center, minimum width=5.0cm, minimum height=0.62cm},
+    flow/.style={-{Stealth[length=2mm]}, thick}, node distance=0.42cm]
+  \node[mod] (m1) {Bộ đăng ký NATS \texttt{zt.alerts.raw}};
+  \node[mod, below=of m1] (m2) {Correlator: khử trùng lặp\\theo cửa sổ (khóa \texttt{type{\textbar}source})};
+  \draw[flow] (m1) -- (m2);
+  \node[mod, below=of m2] (m3) {Nâng cấp mức nghiêm trọng\\khi \emph{cross-node} ($\geq 2$ node)};
+  \draw[flow] (m2) -- (m3);
+  \node[mod, below=of m3] (m4) {Phát \texttt{zt.alerts.enriched}\\$+$ số liệu Prometheus};
+  \draw[flow] (m3) -- (m4);
+  \node[draw, dashed, rounded corners=3pt, fit=(m1)(m2)(m3)(m4), inner sep=9pt, label={[font=\footnotesize\bfseries]above:aggregator}] {};
+\end{tikzpicture}

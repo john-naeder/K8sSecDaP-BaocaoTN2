@@ -1,0 +1,21 @@
+# Throw-away pod to inspect alerts from inside the cluster:
+#   kubectl -n zt-mapper exec -it alert-viewer -- sh
+# Examples once attached:
+#   kubectl -n zt-mapper logs -f ds/zt-pipeline | jq -c 'select(.type)'
+#   nats sub -s nats://nats.soc.svc.cluster.local:4222 "zt.alerts.>"
+apiVersion: v1
+kind: Pod
+metadata:
+  name: alert-viewer
+  namespace: zt-mapper
+  labels:
+    app.kubernetes.io/name: alert-viewer
+spec:
+  restartPolicy: Always
+  containers:
+    - name: tools
+      image: natsio/nats-box:0.14.5
+      command: ["sleep", "infinity"]
+      resources:
+        requests: { cpu: 10m, memory: 32Mi }
+        limits:   { cpu: 200m, memory: 128Mi }

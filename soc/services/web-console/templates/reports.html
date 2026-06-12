@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+{% block title %}Weekly report — ZT-SOC{% endblock %}
+{% block content %}
+  <p><a href="/">← back</a></p>
+  <h2>Weekly report
+    {% if report.WeekISO %}— {{ report.WeekISO }}{% endif %}
+  </h2>
+
+  <form method="get" action="/reports" style="margin-bottom: 16px;">
+    <label>ISO week (YYYY-WW):</label>
+    <input type="text" name="week" value="{{ week }}" placeholder="leave blank = last completed week">
+    <button type="submit">View</button>
+  </form>
+
+  <form method="post" action="/reports/generate" style="margin-bottom: 16px;">
+    <input type="hidden" name="week" value="{{ week }}">
+    <button type="submit" class="danger">Generate &amp; upload to MinIO</button>
+  </form>
+
+  <h3>Headline</h3>
+  <table>
+    <tr><th>Window</th><td>{{ report.From }} → {{ report.To }}</td></tr>
+    <tr><th>Total incidents</th><td>{{ report.TotalIncidents }}</td></tr>
+    <tr><th>MTTR median (s)</th><td>{{ report.MTTRMedianSeconds }}</td></tr>
+    <tr><th>Audit events</th><td>{{ report.AuditEventsCount }}</td></tr>
+  </table>
+
+  <h3>Severity breakdown</h3>
+  <table>
+    <thead><tr><th>Severity</th><th>Count</th></tr></thead>
+    <tbody>
+    {% for sev, n in (report.BySeverity or {}).items() %}
+      <tr><td><span class="sev-{{ sev }}">{{ sev }}</span></td><td>{{ n }}</td></tr>
+    {% else %}
+      <tr><td colspan="2"><em>None.</em></td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+
+  <h3>Top attackers</h3>
+  <table>
+    <thead><tr><th>Source IP</th><th>Count</th></tr></thead>
+    <tbody>
+    {% for a in (report.TopAttackers or []) %}
+      <tr><td><code>{{ a.SourceIP }}</code></td><td>{{ a.Count }}</td></tr>
+    {% else %}
+      <tr><td colspan="2"><em>None.</em></td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+
+  <h3>Actions breakdown</h3>
+  <table>
+    <thead><tr><th>Type</th><th>Count</th></tr></thead>
+    <tbody>
+    {% for t, n in (report.ActionsBreakdown or {}).items() %}
+      <tr><td>{{ t }}</td><td>{{ n }}</td></tr>
+    {% else %}
+      <tr><td colspan="2"><em>None.</em></td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+
+  <h3>Compliance / forensic audit dump</h3>
+  <form method="get" action="/audit/export" style="background: #f7f9fa; padding: 12px; border-radius: 6px;">
+    <label>From (YYYY-MM-DD)</label>
+    <input type="date" name="from">
+    <label>To (YYYY-MM-DD)</label>
+    <input type="date" name="to">
+    <label>Actor (optional)</label>
+    <input type="text" name="actor" placeholder="admin-demo">
+    <label>Format</label>
+    <select name="format">
+      <option value="csv">CSV</option>
+      <option value="json">JSON (NDJSON)</option>
+    </select>
+    <button type="submit">Download</button>
+  </form>
+{% endblock %}

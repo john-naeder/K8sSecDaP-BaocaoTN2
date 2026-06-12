@@ -1,0 +1,294 @@
+{
+  "title": "Zero-Trust SOC — Alerts Overview",
+  "uid": "zt-soc-overview",
+  "schemaVersion": 39,
+  "version": 1,
+  "tags": ["zero-trust", "soc", "alerts"],
+  "timezone": "browser",
+  "time": { "from": "now-30m", "to": "now" },
+  "refresh": "10s",
+  "templating": {
+    "list": [
+      {
+        "name": "DS_LOKI",
+        "type": "datasource",
+        "query": "loki",
+        "current": { "text": "Loki", "value": "Loki" },
+        "hide": 0,
+        "label": "Loki datasource"
+      },
+      {
+        "name": "node",
+        "type": "query",
+        "datasource": { "type": "loki", "uid": "${DS_LOKI}" },
+        "query": { "label": "pod", "stream": "{namespace=\"zt-mapper\"}", "type": 1 },
+        "refresh": 2,
+        "includeAll": true,
+        "multi": true,
+        "current": { "text": "All", "value": "$__all" },
+        "label": "Pod"
+      },
+      {
+        "name": "severity",
+        "type": "custom",
+        "query": "low,medium,high,critical",
+        "multi": true,
+        "includeAll": true,
+        "current": { "text": "All", "value": "$__all" }
+      }
+    ]
+  },
+  "panels": [
+    {
+      "type": "stat",
+      "id": 1,
+      "title": "Total alerts (window)",
+      "gridPos": { "h": 4, "w": 4, "x": 0, "y": 0 },
+      "datasource": { "type": "loki", "uid": "${DS_LOKI}" },
+      "targets": [
+        {
+          "expr": "sum(count_over_time({namespace=\"zt-mapper\"} |~ \"^\\\\{\\\"type\\\"\" [$__range]))",
+          "queryType": "instant",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 10 },
+              { "color": "red", "value": 50 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "type": "stat",
+      "id": 2,
+      "title": "High / Critical",
+      "gridPos": { "h": 4, "w": 4, "x": 4, "y": 0 },
+      "datasource": { "type": "loki", "uid": "${DS_LOKI}" },
+      "targets": [
+        {
+          "expr": "sum(count_over_time({namespace=\"zt-mapper\"} |~ \"\\\"severity\\\":\\\"(high|critical)\\\"\" [$__range]))",
+          "queryType": "instant",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "fixed", "fixedColor": "red" },
+          "thresholds": { "mode": "absolute", "steps": [ { "color": "red", "value": null } ] }
+        }
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "graphMode": "area"
+      }
+    },
+    {
+      "type": "stat",
+      "id": 3,
+      "title": "Port scans",
+      "gridPos": { "h": 4, "w": 4, "x": 8, "y": 0 },
+      "datasource": { "type": "loki", "uid": "${DS_LOKI}" },
+      "targets": [
+        {
+          "expr": "sum(count_over_time({namespace=\"zt-mapper\"} |~ \"\\\"type\\\":\\\"port_scan\\\"\" [$__range]))",
+          "queryType": "instant",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "color": { "mode": "fixed", "fixedColor": "yellow" } }
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+      }
+    },
+    {
+      "type": "stat",
+      "id": 4,
+      "title": "Blast radius alerts",
+      "gridPos": { "h": 4, "w": 4, "x": 12, "y": 0 },
+      "datasource": { "type": "loki", "uid": "${DS_LOKI}" },
+      "targets": [
+        {
+          "expr": "sum(count_over_time({namespace=\"zt-mapper\"} |~ \"\\\"type\\\":\\\"blast_radius\\\"\" [$__range]))",
+          "queryType": "instant",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "color": { "mode": "fixed", "fixedColor": "orange" } }
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+      }
+    },
+    {
+      "type": "stat",
+      "id": 5,
+      "title": "SCC anomalies (lateral movement)",
+      "gridPos": { "h": 4, "w": 4, "x": 16, "y": 0 },
+      "datasource": { "type": "loki", "uid": "${DS_LOKI}" },
+      "targets": [
+        {
+          "expr": "sum(count_over_time({namespace=\"zt-mapper\"} |~ \"\\\"type\\\":\\\"scc_anomaly\\\"\" [$__range]))",
+          "queryType": "instant",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "color": { "mode": "fixed", "fixedColor": "purple" } }
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+      }
+    },
+    {
+      "type": "stat",
+      "id": 6,
+      "title": "Alert rate (per min)",
+      "gridPos": { "h": 4, "w": 4, "x": 20, "y": 0 },
+      "datasource": { "type": "loki", "uid": "${DS_LOKI}" },
+      "targets": [
+        {
+          "expr": "sum(rate({namespace=\"zt-mapper\"} |~ \"^\\\\{\\\"type\\\"\" [$__interval])) * 60",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 1
+        }
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+      }
+    },
+    {
+      "type": "timeseries",
+      "id": 10,
+      "title": "Alerts over time (by severity)",
+      "gridPos": { "h": 8, "w": 16, "x": 0, "y": 4 },
+      "datasource": { "type": "loki", "uid": "${DS_LOKI}" },
+      "targets": [
+        {
+          "expr": "sum by (severity) (count_over_time({namespace=\"zt-mapper\"} |~ \"^\\\\{\\\"type\\\"\" | json | __error__=\"\" [$__interval]))",
+          "legendFormat": "{{severity}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 70,
+            "lineWidth": 1,
+            "stacking": { "mode": "normal", "group": "A" }
+          },
+          "color": { "mode": "palette-classic" }
+        },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "high" },     "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "red"    } } ] },
+          { "matcher": { "id": "byName", "options": "critical" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "dark-red" } } ] },
+          { "matcher": { "id": "byName", "options": "medium" },   "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "yellow" } } ] },
+          { "matcher": { "id": "byName", "options": "low" },      "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "green"  } } ] }
+        ]
+      },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom", "calcs": ["sum"] }
+      }
+    },
+    {
+      "type": "piechart",
+      "id": 11,
+      "title": "Alerts by type",
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 4 },
+      "datasource": { "type": "loki", "uid": "${DS_LOKI}" },
+      "targets": [
+        {
+          "expr": "sum by (type) (count_over_time({namespace=\"zt-mapper\"} |~ \"^\\\\{\\\"type\\\"\" | json | __error__=\"\" [$__range]))",
+          "legendFormat": "{{type}}",
+          "queryType": "instant",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "legend": { "displayMode": "list", "placement": "right", "values": ["value"] },
+        "pieType": "donut"
+      }
+    },
+    {
+      "type": "table",
+      "id": 20,
+      "title": "Top source IPs (alerted)",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 12 },
+      "datasource": { "type": "loki", "uid": "${DS_LOKI}" },
+      "targets": [
+        {
+          "expr": "topk(10, sum by (source) (count_over_time({namespace=\"zt-mapper\"} |~ \"^\\\\{\\\"type\\\"\" | json | __error__=\"\" [$__range])))",
+          "queryType": "instant",
+          "format": "table",
+          "refId": "A"
+        }
+      ],
+      "transformations": [
+        { "id": "organize", "options": { "excludeByName": { "Time": true }, "renameByName": { "Value": "alerts", "source": "source IP" } } },
+        { "id": "sortBy", "options": { "fields": {}, "sort": [ { "field": "alerts", "desc": true } ] } }
+      ]
+    },
+    {
+      "type": "table",
+      "id": 21,
+      "title": "Alerts by node",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 12 },
+      "datasource": { "type": "loki", "uid": "${DS_LOKI}" },
+      "targets": [
+        {
+          "expr": "sum by (node_name, type) (count_over_time({namespace=\"zt-mapper\"} |~ \"^\\\\{\\\"type\\\"\" | json | __error__=\"\" [$__range]))",
+          "queryType": "instant",
+          "format": "table",
+          "refId": "A"
+        }
+      ],
+      "transformations": [
+        { "id": "organize", "options": { "excludeByName": { "Time": true }, "renameByName": { "Value": "count", "node_name": "node", "type": "alert type" } } }
+      ]
+    },
+    {
+      "type": "logs",
+      "id": 30,
+      "title": "Live alert stream",
+      "gridPos": { "h": 12, "w": 24, "x": 0, "y": 20 },
+      "datasource": { "type": "loki", "uid": "${DS_LOKI}" },
+      "targets": [
+        {
+          "expr": "{namespace=\"zt-mapper\"} |~ \"^\\\\{\\\"type\\\"\" | json | line_format \"[{{.severity | upper}}] {{.type}} src={{.source}} node={{.node_name}} ts={{.timestamp_ns}}\"",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "showTime": true,
+        "showLabels": false,
+        "showCommonLabels": false,
+        "wrapLogMessage": true,
+        "prettifyLogMessage": false,
+        "enableLogDetails": true,
+        "dedupStrategy": "none",
+        "sortOrder": "Descending"
+      }
+    }
+  ]
+}

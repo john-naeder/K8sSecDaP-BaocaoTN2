@@ -1,0 +1,31 @@
+% DFD muc 2: phan ra tien trinh 2.0 (Phat hien) cua pipeline. Chuong 3.
+\begin{tikzpicture}[
+    node distance=1.2cm and 1.7cm,
+    every node/.style={font=\footnotesize},
+    proc/.style={draw, circle, fill=blue!12, align=center, minimum size=1.85cm},
+    ext/.style={draw, fill=gray!10, align=center, minimum width=1.9cm, minimum height=0.95cm},
+    store/.style={draw, fill=orange!14, align=center, minimum width=3.7cm, minimum height=0.72cm},
+    flow/.style={-{Stealth[length=2mm]}, thick, font=\scriptsize},
+  ]
+  % Hang tren: luong chinh in -> 2.1 -> 2.2 -> 2.4 -> 3.0
+  \node[ext] (in) {1.0\\Thu thập};
+  \node[proc, right=of in] (p1) {2.1\\Phân loại\\(LPM)};
+  \node[proc, right=of p1] (p2) {2.2\\Đếm tần suất\\(CMS)};
+  \node[proc, right=of p2] (p4) {2.4\\Sinh\\cảnh báo};
+  \node[ext, right=of p4] (out) {3.0\\Quản lý\\sự cố};
+  % Nhanh do thi 2.3 nam duoi 2.2; kho du lieu D nam duoi 2.3 (cach ro rang)
+  \node[proc, below=1.75cm of p2] (p3) {2.3\\Phân tích\\đồ thị\\(Tarjan/BFS)};
+  \node[store, below=0.95cm of p3] (d) {D: trạng thái sketch \& đồ thị};
+
+  \draw[flow] (in) -- node[above]{sự kiện} (p1);
+  \draw[flow] (p1) -- node[above]{$+$ nhãn vùng} (p2);
+  \draw[flow] (p2) -- node[above]{vượt ngưỡng} (p4);
+  \draw[flow] (p4) -- node[above]{cảnh báo} (out);
+  % 2.1 -> 2.3 (re xuong nhanh do thi)
+  \draw[flow] (p1.south) |- (p3.west);
+  % 2.3 -> 2.4 (chu trinh / ban kinh): re phai roi len, di duoi 2.2
+  \draw[flow] (p3.east) -| node[pos=0.28,below]{chu trình / bán kính} (p4.south);
+  % 2.2 va 2.3 ghi/doc trang thai vao kho D
+  \draw[flow] (p3) -- (d);
+  \draw[flow] (p2.west) -- ++(-0.55,0) |- (d.west);
+\end{tikzpicture}

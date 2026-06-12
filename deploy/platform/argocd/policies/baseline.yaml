@@ -1,0 +1,62 @@
+# Kyverno ClusterPolicy baseline — minimal hygiene rules for BC2. Extend
+# this file (or add siblings) as new constraints emerge. Audit mode keeps
+# violations surfaced without blocking deploys during luận-văn demo.
+#
+# Skipped vs old config: image-signature verification + SLSA-provenance
+# verification (require Cosign + SLSA L3 — outside BC2 scope).
+---
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: require-managed-by-label
+  annotations:
+    policies.kyverno.io/title: Require app.kubernetes.io/managed-by label
+    policies.kyverno.io/category: Observability
+    policies.kyverno.io/severity: low
+    policies.kyverno.io/description: |
+      Every workload (Deployment, StatefulSet, DaemonSet, Job, CronJob)
+      must carry app.kubernetes.io/managed-by so ownership is queryable.
+spec:
+  validationFailureAction: audit
+  background: true
+  rules:
+    - name: check-managed-by
+      match:
+        any:
+          - resources:
+              kinds: ["Deployment", "StatefulSet", "DaemonSet", "Job", "CronJob"]
+      validate:
+        message: "label app.kubernetes.io/managed-by is required"
+        pattern:
+          metadata:
+            labels:
+              app.kubernetes.io/managed-by: "?*"
+---
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: disallow-latest-tag
+  annotations:
+    policies.kyverno.io/title: Disallow :latest image tag
+    policies.kyverno.io/category: Best Practices
+    policies.kyverno.io/severity: medium
+    policies.kyverno.io/description: |
+      Refuse images pinned to :latest — they break Argo CD drift detection
+      and disable rollbacks. Use a digest or semver tag.
+spec:
+  validationFailureAction: audit
+  background: true
+  rules:
+    - name: check-image-tag
+      match:
+        any:
+          - resources:
+              kinds: ["Pod"]
+      validate:
+        message: "Using a mutable image tag like :latest is not allowed."
+        pattern:
+          spec:
+            =(initContainers):
+              - image: "!*:latest"
+            containers:
+              - image: "!*:latest"

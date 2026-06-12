@@ -1,0 +1,53 @@
+% ============================================================================
+% MO DAU (Loi mo dau) — gioi thieu so, dat van de, boi canh
+% ============================================================================
+
+\chapter*{MỞ ĐẦU}
+\phantomsection
+\addcontentsline{toc}{chapter}{MỞ ĐẦU}
+\markboth{MỞ ĐẦU}{MỞ ĐẦU}
+
+Trong khoảng một thập kỷ trở lại đây, kiến trúc phần mềm doanh nghiệp đã dịch chuyển mạnh
+mẽ từ ứng dụng \emph{một khối} (\textit{monolithic}) sang \emph{vi dịch vụ}
+(\textit{microservices}) đóng gói trong container và điều phối bằng Kubernetes. Sự dịch
+chuyển này mang lại tốc độ phát triển và khả năng mở rộng vượt trội, nhưng đồng thời làm
+thay đổi căn bản bề mặt tấn công: thay vì các lời gọi nội bộ gọn trong một tiến trình, hệ
+thống nay có hàng trăm điểm cuối nội bộ liên lạc với nhau qua mạng. Phần lưu lượng nội cụm
+(hướng Đông--Tây) này gần như vô hình trước các biện pháp an ninh chu vi truyền thống, trở
+thành mảnh đất cho hai hành vi tấn công điển hình: \emph{quét cổng} để trinh sát và
+\emph{dịch chuyển ngang} để mở rộng quyền kiểm soát giữa các pod.
+
+\textbf{Đặt vấn đề.} Làm thế nào để \emph{quan sát} được trọn vẹn lưu lượng nội cụm và
+\emph{phát hiện sớm} các hành vi quét cổng, dịch chuyển ngang ngay trong một cụm Kubernetes,
+với chi phí đủ thấp để chạy thường trực, rồi \emph{khép kín} bằng một cơ chế phản hồi có
+kiểm soát? Đây là bài toán mà đồ án hướng tới giải quyết.
+
+\textbf{Nội dung đồ án.} Đồ án xây dựng và đánh giá một hệ thống giám sát --- phản hồi an
+ninh đầu cuối cho cụm Kubernetes, đặt tên K8sSecDaP. Hệ thống thu thập sự kiện kết nối ngay
+tại \emph{tầng nhân} bằng công nghệ eBPF, phát hiện bất thường bằng các \emph{cấu trúc dữ
+liệu luồng} (Count-Min Sketch) và \emph{giải thuật đồ thị} (Tarjan, BFS), quản lý sự cố qua
+một cụm dịch vụ SOC, và khép kín vòng phản hồi bằng cách sinh chính sách mạng
+\texttt{NetworkPolicy} có người duyệt để cách ly nguồn tấn công. Toàn bộ được triển khai và
+đo đạc trên một cụm Kubernetes thật.
+
+\textbf{Lý do chọn đề tài.} Trong bối cảnh nêu trên, mô hình \textit{Zero-Trust} --- nơi
+mọi kết nối đều bị coi là không đáng tin cho đến khi được xác thực --- là một nguyên tắc
+được giới học thuật và công nghiệp đồng thuận \cite{nist800207}, nhưng việc \textit{hiện
+thực hoá} nguyên tắc này trên một cụm Kubernetes nội bộ vẫn còn nhiều vướng mắc kỹ thuật.
+Điều khiến Zero-Trust khó hiện thực hóa nội cụm không nằm ở nguyên lý mà ở \emph{khả năng
+quan sát}: muốn ``không tin tưởng mặc nhiên mọi kết nối'' thì trước hết phải \emph{thấy}
+được mọi kết nối. Đây cũng là lý do đồ án chọn quan sát ở tầng nhân bằng eBPF làm điểm tựa
+kỹ thuật: nó cung cấp tầm nhìn Đông--Tây mà các lớp giám sát hướng host không có, từ đó
+mới có thể đặt nền cho phát hiện và phản hồi có kiểm soát. Đồ án cũng tiếp nối và mở rộng
+kết quả của Báo cáo học phần tốt nghiệp (CNPM~1): từ một bài toán trừu tượng về ước lượng
+tần suất trên luồng dữ liệu --- giải bằng Count-Min Sketch --- phát triển thành một hệ
+thống hoàn chỉnh từ thu thập ở tầng nhân tới quản lý sự cố và phản hồi trên cụm thật.
+
+\textbf{Bố cục đồ án.} Đồ án gồm năm chương:
+\begin{itemize}
+  \item \textbf{Chương~\ref{ch:overview} --- Tổng quan:} bối cảnh, khảo sát nhu cầu thực tế, mô hình mối đe dọa, phân tích yêu cầu và khảo sát công cụ liên quan.
+  \item \textbf{Chương~\ref{ch:foundations} --- Cơ sở lý thuyết và công nghệ:} eBPF/CO-RE, Count-Min Sketch, Tarjan, BFS, LPM-Trie và nền tảng công nghệ sử dụng.
+  \item \textbf{Chương~\ref{ch:design} --- Phân tích và thiết kế hệ thống:} mô hình mối đe dọa chi tiết, kiến trúc phần mềm, thiết kế cơ sở dữ liệu và thiết kế giao diện người dùng.
+  \item \textbf{Chương~\ref{ch:impl} --- Cài đặt, triển khai và thử nghiệm hệ thống:} hạ tầng nền tảng, các thành phần lõi (collector/pipeline/SOC), ứng dụng và giao diện vận hành, cùng việc chạy thử nghiệm end-to-end trên cluster thật.
+  \item \textbf{Chương~\ref{ch:eval} --- Đánh giá và kết luận:} phương pháp và kết quả đánh giá định lượng, so sánh, giới hạn và hướng phát triển.
+\end{itemize}

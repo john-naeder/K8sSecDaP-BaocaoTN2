@@ -1,0 +1,48 @@
+% Sơ đồ kiến trúc phân lớp (C4 - mức Container). Dùng ở Chương 3.
+\begin{tikzpicture}[
+    every node/.style={font=\footnotesize},
+    comp/.style={draw, rounded corners=2pt, align=center, minimum width=2.9cm,
+                 minimum height=0.95cm},
+    kern/.style={comp, fill=red!12},
+    proc/.style={comp, fill=blue!10},
+    data/.style={comp, fill=orange!16},
+    ui/.style={comp, fill=green!14},
+    bus/.style ={draw, rounded corners=2pt, fill=orange!16, align=center,
+                 minimum width=12.6cm, minimum height=0.85cm},
+    flow/.style={-{Stealth[length=2.2mm]}, thick},
+    lbl/.style={font=\scriptsize, fill=white, inner sep=1.5pt},
+  ]
+  % Hang 1: mat phang du lieu tren moi node (gian cach rong de nhan mui ten khong tran)
+  \node[kern] (kprobe)    at (0,0)   {eBPF kprobe\\\texttt{tcp\_v4\_connect}};
+  \node[proc] (collector) at (4.6,0) {Collector\\(libbpf, C++)};
+  \node[proc] (pipeline)  at (9.2,0) {Pipeline engine\\CMS/Tarjan/BFS};
+
+  % Bus NATS (thanh ngang rong) o giua
+  \node[bus] (nats) at (4.6,-2.0) {NATS JetStream --- bus sự kiện / cảnh báo};
+
+  % Hang 3: hai dich vu tieu thu
+  \node[proc] (agg)      at (0,-4.0)   {Aggregator\\(đồ thị toàn cục)};
+  \node[proc] (incident) at (9.2,-4.0) {Incident service\\(Go)};
+
+  % Hang 4: luu tru + giao dien
+  \node[ui]   (grafana) at (0,-6.0)   {Grafana\\(dashboard)};
+  \node[ui]   (console) at (4.6,-6.0) {Web console\\(duyệt phản hồi)};
+  \node[data] (pg)      at (9.2,-6.0) {PostgreSQL\\(sự cố/kiểm toán)};
+  \node[kern] (k8s)     at (4.6,-7.7) {Kubernetes API\\(NetworkPolicy)};
+
+  % Luong hang 1 (nhan DAT TREN mui ten, du khoang trong)
+  \draw[flow] (kprobe.east)    -- node[lbl, above]{ring buf} (collector.west);
+  \draw[flow] (collector.east) -- node[lbl, above]{JSON}     (pipeline.west);
+  % Pipeline xuat ban xuong bus
+  \draw[flow] (pipeline.south) -- (pipeline.south|-nats.north);
+  % Bus -> 2 dich vu tieu thu (mui ten huong XUONG = tieu thu)
+  \draw[flow] (nats.south-|agg.north)      -- (agg.north);
+  \draw[flow] (nats.south-|incident.north) -- (incident.north);
+  % Dich vu -> luu tru / giao dien
+  \draw[flow] (agg)      -- (grafana);
+  \draw[flow] (incident) -- (pg);
+  % incident -> web console: thoat ben TRAI incident, di ngang roi xuong (khong trung incident->pg)
+  \draw[flow] (incident.west) -- (console.north|-incident.west) -- (console.north);
+  % Web console ap NetworkPolicy
+  \draw[flow] (console) -- node[lbl, right]{apply} (k8s);
+\end{tikzpicture}

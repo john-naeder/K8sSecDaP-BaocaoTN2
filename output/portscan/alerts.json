@@ -1,0 +1,5 @@
+[
+  {"algo":"cms","src_ip":"10.0.5.99","freq":41,"timestamp_ns":1700000000104000000,"window_id":0,"event_index":141},
+  {"algo":"mg","src_ip":"10.0.5.99","freq":41,"timestamp_ns":1700000000104000000,"window_id":0,"event_index":141},
+  {"algo":"hashmap","src_ip":"10.0.5.99","freq":41,"timestamp_ns":1700000000104000000,"window_id":0,"event_index":141}
+]

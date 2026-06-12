@@ -1,0 +1,37 @@
+% Hai mau hanh vi: (trai) quet cong = 1 nguon -> nhieu dich; (phai) dich chuyen ngang = chuoi pod. Chuong 2.
+\begin{tikzpicture}[font=\footnotesize, >={Stealth[length=2mm]},
+    src/.style ={draw, circle, fill=red!22, draw=red!70!black, minimum size=0.85cm,
+                 font=\scriptsize\bfseries},
+    tgt/.style ={draw, rounded corners=2pt, fill=blue!10, minimum width=1.05cm,
+                 minimum height=0.55cm, font=\scriptsize},
+    comp/.style={draw, rounded corners=2pt, fill=red!16, draw=red!70!black,
+                 minimum width=1.05cm, minimum height=0.6cm, font=\scriptsize\bfseries},
+    scan/.style={->, red!70!black, thick},
+    lat/.style ={->, red!70!black, very thick},
+  ]
+  % ===== Panel trai: QUET CONG =====
+  \node[src] (s) at (0,0) {S};
+  \foreach \i/\y in {1/2.0, 2/1.0, 3/0.0, 4/-1.0, 5/-2.0}{
+    \node[tgt] (t\i) at (2.6,\y) {cổng \i};
+    \draw[scan] (s) -- (t\i);
+  }
+  \node[align=center, font=\scriptsize, below=2.7cm of s, yshift=0.3cm] (capL)
+    {\textbf{Quét cổng}\\một nguồn $S$ tạo \emph{nhiều} kết nối\\$\Rightarrow$ tín hiệu: \emph{tần suất} cao (CMS)};
+
+  % ===== Panel phai: DICH CHUYEN NGANG =====
+  \begin{scope}[xshift=7.2cm]
+    \node[comp] (a) at (0,1.0)   {pod A};
+    \node[comp] (b) at (1.9,0.0) {pod B};
+    \node[comp] (c) at (3.8,1.0) {pod C};
+    \node[comp] (d) at (2.9,-1.4){pod D};
+    \draw[lat] (a) -- (b);
+    \draw[lat] (b) -- (c);
+    \draw[lat] (b) -- (d);
+    \draw[lat] (c) to[bend left=20] (a);  % chu trinh -> SCC
+    \node[align=center, font=\scriptsize, below=0.4cm of d] (capR)
+      {\textbf{Dịch chuyển ngang}\\chuỗi/chu trình pod bị chiếm\\$\Rightarrow$ tín hiệu: \emph{cấu trúc đồ thị} (Tarjan/BFS)};
+  \end{scope}
+
+  % vach ngan giua hai panel
+  \draw[gray!45, dashed] (4.4,2.4) -- (4.4,-3.0);
+\end{tikzpicture}

@@ -1,0 +1,52 @@
+\chapter{Mã nguồn lõi: Tarjan SCC và BFS bán kính ảnh hưởng}
+\label{app:dsa}
+
+Hai giải thuật đồ thị của pipeline (kho \texttt{K8sSecDaP-pipeline},
+\texttt{libdsa/src/graph/}) phục vụ phát hiện dịch chuyển ngang: Tarjan tìm thành phần
+liên thông mạnh (chu trình giao tiếp bất thường), còn BFS đo bán kính ảnh hưởng (số pod
+một nguồn tiếp cận được trong $k$ bước). Cơ sở lý thuyết đã trình bày ở
+Chương~\ref{ch:foundations}; phần này trích phần lõi của hiện thực.
+
+\section{Tarjan SCC (hiện thực lặp)}
+
+Để tránh tràn ngăn xếp lời gọi trên đồ thị lớn, Tarjan được hiện thực bằng DFS
+\emph{lặp} (dùng ngăn xếp tường minh) thay vì đệ quy; mỗi đỉnh giữ chỉ số khám phá
+\texttt{disc} và liên kết thấp \texttt{low}, một SCC được kết xuất khi
+\texttt{low[u] == disc[u]}.
+
+\begin{lstlisting}[language=C++,caption={Điểm mấu chốt của Tarjan: cập nhật low-link và kết xuất SCC (\texttt{tarjan.cpp}).}]
+// Khi quay lui tu dinh con v ve cha u:
+low[cur.u] = std::min(low[cur.u], low[v]);
+// Khi gap dinh v da tham va con tren stack (canh nguoc):
+if (on_stack[v]) low[cur.u] = std::min(low[cur.u], disc[v]);
+// u la goc cua mot SCC:
+if (low[cur.u] == disc[cur.u]) {
+    Component scc;
+    uint32_t w;
+    do { w = stk.top(); stk.pop(); on_stack[w] = false; scc.push_back(w); }
+    while (w != cur.u);
+    components.push_back(std::move(scc));
+}
+\end{lstlisting}
+
+\section{BFS bán kính ảnh hưởng (k-hop)}
+
+BFS duyệt theo lớp từ địa chỉ nguồn, dừng ở độ sâu \texttt{max\_hops}; tập đỉnh tới được
+chính là \emph{bán kính ảnh hưởng} (blast radius) của nguồn~--~thước đo mức độ lan rộng
+nếu nguồn đó tiếp tục dịch chuyển ngang.
+
+\begin{lstlisting}[language=C++,caption={Duyệt BFS theo lớp, dừng ở $k$ bước (\texttt{bfs.cpp}).}]
+ReachabilityResult BFSReachability::reachable_within(
+    const DirectedGraph& g, uint32_t source, int max_hops) {
+    std::queue<uint32_t> q;  q.push(source);
+    std::unordered_map<uint32_t,int> dist; dist[source] = 0;
+    while (!q.empty()) {
+        uint32_t u = q.front(); q.pop();
+        int d = dist[u];
+        if (d >= max_hops) continue;            // khong mo rong qua k buoc
+        for (uint32_t v : g.neighbors(u))
+            if (dist.find(v) == dist.end()) { dist[v] = d + 1; q.push(v); }
+    }
+    return dist;   // tap dinh toi duoc + so buoc -> ban kinh anh huong
+}
+\end{lstlisting}

@@ -1,0 +1,22 @@
+>>> 1. Sinh 200 sự kiện (seed=42, attacker chèn từ event 100, 50 probes)…
+Sinh được 200 sự kiện (nền=150, quét=50, attacker=10.0.5.99)
+>>> 2. Chạy 3 thuật toán song song (CMS / MG / HashMap)…
+[portscan-pipeline] Đã đọc 200 dòng đầu vào
+[cms] processed=200 alerts=1 peak_memory=81940 bytes throughput=208274 eps
+  [ALERT cms] 10.0.5.99 freq=41 event#141
+[mg] processed=200 alerts=1 peak_memory=431 bytes throughput=167121 eps
+  [ALERT mg] 10.0.5.99 freq=41 event#141
+[hashmap] processed=200 alerts=1 peak_memory=407 bytes throughput=218838 eps
+  [ALERT hashmap] 10.0.5.99 freq=41 event#141
+
+>>> 3. Tổng hợp:
+  Stream      : /home/john/dev/_split/K8sSecDaP/output/portscan/sample_stream.jsonl
+  Alerts JSON : /home/john/dev/_split/K8sSecDaP/output/portscan/alerts.json
+  Comparison  : /home/john/dev/_split/K8sSecDaP/output/portscan/comparison.csv
+  Trace files : /home/john/dev/_split/K8sSecDaP/output/portscan/trace_{cms,mg,hashmap}.txt
+
+Bảng so sánh:
+algo     total_events  alerts  true_positives  false_positives  peak_memory_kb  throughput_eps
+cms      200           1       1               0                80.0195         208274
+mg       200           1       1               0                0.420898        167121
+hashmap  200           1       1               0                0.397461        218838

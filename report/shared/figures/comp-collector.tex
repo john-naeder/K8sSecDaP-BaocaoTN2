@@ -1,0 +1,13 @@
+%% Component diagram noi bo: collector (C++, libbpf). Chuong 3.
+\begin{tikzpicture}[font=\footnotesize, >={Stealth[length=2mm]},
+    mod/.style={draw, rounded corners=2pt, fill=blue!8, align=center, minimum width=4.6cm, minimum height=0.62cm},
+    flow/.style={-{Stealth[length=2mm]}, thick}, node distance=0.42cm]
+  \node[mod] (m1) {eBPF prog: kprobe/kretprobe \texttt{tcp\_v4\_connect}};
+  \node[mod, below=of m1] (m2) {3 BPF map: \texttt{cidr\_map} / \texttt{events} / \texttt{sock\_store}};
+  \draw[flow] (m1) -- (m2);
+  \node[mod, below=of m2] (m3) {libbpf reader (\texttt{ring\_buffer\_\_poll})};
+  \draw[flow] (m2) -- (m3);
+  \node[mod, below=of m3] (m4) {Bộ xuất JSON $\rightarrow$ pipeline};
+  \draw[flow] (m3) -- (m4);
+  \node[draw, dashed, rounded corners=3pt, fit=(m1)(m2)(m3)(m4), inner sep=9pt, label={[font=\footnotesize\bfseries]above:collector (C++, libbpf)}] {};
+\end{tikzpicture}

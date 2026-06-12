@@ -1,0 +1,31 @@
+% Duong di chi tiet: connect() -> kprobe/kretprobe -> loc LPM -> RINGBUF -> collector -> pipeline. Chuong 2.
+\begin{tikzpicture}[font=\footnotesize, node distance=0.62cm and 0.9cm,
+    pod/.style ={draw, rounded corners=2pt, fill=blue!10, align=center, minimum height=0.8cm, minimum width=4.4cm},
+    ker/.style ={draw, rounded corners=2pt, fill=green!12, align=center, minimum height=0.8cm, minimum width=5.6cm},
+    dec/.style ={draw, diamond, aspect=2.6, fill=yellow!20, align=center, inner sep=1pt},
+    usr/.style ={draw, rounded corners=2pt, fill=blue!8, align=center, minimum height=0.8cm, minimum width=5.6cm},
+    map/.style ={draw, rounded corners=2pt, fill=orange!16, align=center, minimum height=0.7cm, font=\scriptsize},
+    flow/.style={-{Stealth[length=2mm]}, thick},
+  ]
+  \node[pod] (a) {\textbf{Pod:} \texttt{connect(dst\_ip:dst\_port)}};
+  \node[ker, below=of a] (b) {\textbf{kprobe} \texttt{tcp\_v4\_connect\_entry}:\\lưu con trỏ \texttt{sock} theo \texttt{pid\_tgid}};
+  \node[ker, below=of b] (c) {\textbf{kretprobe} \texttt{tcp\_v4\_connect\_return}:\\đọc \texttt{sock} $\rightarrow$ trích \texttt{src\_ip, dst\_ip, dst\_port}};
+  \node[ker, below=of c] (d) {Tra \texttt{cidr\_map} (LPM-Trie)\\$\rightarrow$ \texttt{src\_label}, \texttt{dst\_label}};
+  \node[dec, below=of d] (e) {\texttt{src\_label}\\$=1$ (pod)?};
+  \node[ker, below=1.0cm of e] (f) {Cấp ô \texttt{events} (RINGBUF), điền\\\texttt{network\_event\_t}\{src,dst,port,pid,ts\} $\rightarrow$ submit};
+  \node[usr, below=of f] (g) {\textbf{Collector} (libbpf, \texttt{ring\_buffer\_\_poll})\\$\rightarrow$ dòng JSON $\rightarrow$ FIFO $\rightarrow$ \textbf{pipeline}};
+  \node[draw, rounded corners=2pt, fill=gray!12, right=of e, align=center, minimum height=0.7cm] (drop) {bỏ qua\\(không phải pod)};
+
+  % maps on the side
+  \node[map, right=0.7cm of b] (m1) {\texttt{sock\_store}\\HASH};
+  \node[map, right=0.7cm of d] (m2) {\texttt{cidr\_map}\\LPM\_TRIE};
+  \node[map, right=0.7cm of f] (m3) {\texttt{events}\\RINGBUF};
+
+  \draw[flow] (a)--(b); \draw[flow] (b)--(c); \draw[flow] (c)--(d); \draw[flow] (d)--(e);
+  \draw[flow] (e)-- node[right,font=\scriptsize]{đúng} (f);
+  \draw[flow] (e)-- node[above,font=\scriptsize]{sai} (drop);
+  \draw[flow] (f)--(g);
+  \draw[{Stealth}-{Stealth}, gray] (b.east)--(m1.west);
+  \draw[{Stealth}-{Stealth}, gray] (d.east)--(m2.west);
+  \draw[{Stealth}-{Stealth}, gray] (f.east)--(m3.west);
+\end{tikzpicture}

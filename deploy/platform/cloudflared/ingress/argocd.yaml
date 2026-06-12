@@ -1,0 +1,18 @@
+# argocd-server speaks both gRPC (CLI/UI websockets) and HTTP. Route the
+# whole host to it; ArgoCD's own server handles protocol detection.
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: argocd
+  namespace: traefik
+  labels:
+    app.kubernetes.io/managed-by: zt-platform
+spec:
+  entryPoints: [web]
+  routes:
+    - match: Host(`argocd.zt.local`)
+      kind: Rule
+      services:
+        - name: argocd-server
+          namespace: argocd
+          port: 80

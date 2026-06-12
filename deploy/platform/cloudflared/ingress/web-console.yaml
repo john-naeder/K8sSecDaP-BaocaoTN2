@@ -1,0 +1,16 @@
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: web-console
+  namespace: traefik
+  labels:
+    app.kubernetes.io/managed-by: zt-platform
+spec:
+  entryPoints: [web]
+  routes:
+    - match: Host(`console.zt.local`)
+      kind: Rule
+      services:
+        - name: web-console
+          namespace: soc
+          port: 5000

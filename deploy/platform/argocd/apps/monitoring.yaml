@@ -1,0 +1,114 @@
+# kube-prometheus-stack — Prometheus + Grafana + Alertmanager.
+# Adapted from old config; added zt-soc ServiceMonitor + Alertmanager route
+# to MailHog so port-scan alerts surface in the same inbox as incident emails.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: monitoring
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    chart: kube-prometheus-stack
+    repoURL: https://prometheus-community.github.io/helm-charts
+    targetRevision: "68.4.5"
+    helm:
+      releaseName: kube-prometheus
+      valuesObject:
+        prometheusOperator:
+          admissionWebhooks:
+            certManager: { enabled: true }
+            patch:       { enabled: false }
+        grafana:
+          adminPassword: changeme        # TODO: SealedSecret
+          persistence: { enabled: false }
+          additionalDataSources:
+            - name: Loki
+              type: loki
+              access: proxy
+              url: http://loki.logging.svc.cluster.local:3100
+              isDefault: false
+          resources:
+            requests: { cpu: 25m, memory: 128Mi }
+            limits:   { memory: 256Mi }
+        prometheus:
+          prometheusSpec:
+            retention: 3d
+            storageSpec:
+              volumeClaimTemplate:
+                spec: { resources: { requests: { storage: 5Gi } } }
+            resources:
+              requests: { cpu: 100m, memory: 192Mi }
+              limits:   { memory: 768Mi }
+            # worker-home rides DERP relay so scrapes intermittently
+            # take 2-5s. Default 10s scrape timeout flips its kubelet,
+            # cadvisor, probes, and node-exporter targets to DOWN with
+            # "context deadline exceeded". 45s covers the relay
+            # re-handshake + TLS handshake on the big metrics endpoints
+            # (cadvisor payload is ~2MB → packets fragment over MTU 1230
+            # and occasional drops force retransmits). Interval is 90s
+            # so we still leave headroom.
+            scrapeInterval: "90s"
+            scrapeTimeout: "45s"
+            additionalScrapeConfigs:
+              - job_name: 'zt-soc-incident-service'
+                static_configs:
+                  - targets: ['zt-incident-service.soc.svc.cluster.local:9101']
+              - job_name: 'zt-soc-aggregator'
+                static_configs:
+                  - targets: ['zt-aggregator.soc.svc.cluster.local:9100']
+        alertmanager:
+          alertmanagerSpec:
+            storage:
+              volumeClaimTemplate:
+                spec: { resources: { requests: { storage: 1Gi } } }
+            resources:
+              requests: { cpu: 25m, memory: 32Mi }
+              limits:   { memory: 128Mi }
+          config:
+            global:
+              smtp_smarthost: 'mailhog.soc.svc.cluster.local:1025'
+              smtp_from: 'alertmanager@zt.local'
+              smtp_require_tls: false
+            route:
+              receiver: zt-admin
+              group_by: ['alertname', 'severity']
+              routes:
+                - matchers: ['severity = "critical"']
+                  receiver: zt-admin
+            receivers:
+              - name: zt-admin
+                email_configs:
+                  - to: 'duymt7356@gmail.com'
+                    send_resolved: true
+        additionalPrometheusRulesMap:
+          zt-soc-rules:
+            groups:
+              - name: zt-soc.bc2
+                rules:
+                  - alert: ZTIncidentRateHigh
+                    expr: rate(zt_incidents_created_total[5m]) > 0.1
+                    for: 1m
+                    labels: { severity: warning }
+                    annotations:
+                      summary: "ZT-SOC incident rate elevated"
+                      description: "More than 1 incident per 10s over the last 5m."
+                  - alert: ZTActionsPendingBacklog
+                    expr: sum(zt_actions_generated_total) - sum(zt_actions_executed_total) > 5
+                    for: 5m
+                    labels: { severity: critical }
+                    annotations:
+                      summary: "More than 5 SOC actions awaiting admin approval"
+                      description: "Inspect web-console /actions queue."
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: monitoring
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true

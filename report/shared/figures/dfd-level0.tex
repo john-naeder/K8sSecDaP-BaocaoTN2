@@ -1,0 +1,22 @@
+% DFD mức ngữ cảnh (level 0). Dùng ở Chương 3.
+\begin{tikzpicture}[
+    node distance=2.0cm,
+    every node/.style={font=\small},
+    ext/.style={draw, fill=gray!10, minimum width=2.7cm, minimum height=1.0cm, align=center},
+    proc/.style={draw, circle, fill=blue!12, align=center, minimum size=2.7cm, font=\footnotesize},
+    store/.style={draw, fill=orange!14, align=center, minimum width=2.8cm, minimum height=0.8cm},
+    flow/.style={-{Stealth[length=2.2mm]}, thick, font=\scriptsize},
+  ]
+  \node[ext] (kernel) {Nhân Linux\\trên các node};
+  \node[proc, right=3.6cm of kernel] (soc) {Hệ thống\\SOC\\K8sSecDaP};
+  \node[ext, right=3.6cm of soc] (analyst) {Chuyên viên\\phân tích};
+  \node[store, below=2.0cm of soc] (db) {Kho sự cố \& kiểm toán};
+  \node[ext, above=1.7cm of soc] (k8s) {Kubernetes API\\(NetworkPolicy)};
+
+  \draw[flow] (kernel) -- node[above]{sự kiện \texttt{connect()}} (soc);
+  % Hai chieu soc <-> analyst: tach thanh 2 cung cong, nhan tren/duoi ro rang
+  \draw[flow] (soc) to[bend left=22] node[above, pos=0.5]{cảnh báo / sự cố} (analyst);
+  \draw[flow] (analyst) to[bend left=22] node[below, pos=0.5]{duyệt phản hồi} (soc);
+  \draw[flow] (soc) -- node[right]{ghi / đọc} (db);
+  \draw[flow] (soc) -- node[right]{áp cách ly} (k8s);
+\end{tikzpicture}

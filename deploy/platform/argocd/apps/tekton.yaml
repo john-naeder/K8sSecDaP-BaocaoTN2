@@ -1,0 +1,60 @@
+# Tekton — CI engine. Two charts: pipelines + triggers. Task/Pipeline/
+# EventListener YAMLs ship from platform/tekton/* via a second
+# Application below so chart upgrades don't fight task edits.
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: tekton-pipelines
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://cdfoundation.github.io/tekton-helm-chart
+    chart: tekton-pipeline
+    targetRevision: "1.12.0"
+    helm:
+      releaseName: tekton-pipeline
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: tekton-pipelines
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+---
+# Tekton tasks/pipelines/triggers themselves — driven from this repo.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: tekton-resources
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: git@github.com:john-naeder/K8sSecDaP-deploy.git
+    targetRevision: main
+    path: platform/tekton
+    directory:
+      recurse: true
+      # Tekton Triggers is not yet installed in the cluster (would
+      # require a separate Application off the upstream YAML release).
+      # Until then, skip triggers/* so tekton-resources can still
+      # ship Tasks/Pipelines onto the running tekton-pipeline engine.
+      exclude: "triggers/*"
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: tekton-pipelines
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

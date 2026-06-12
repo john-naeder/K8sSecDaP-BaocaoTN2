@@ -1,0 +1,745 @@
+% ============================================================================
+% Chuong 1: TONG QUAN
+% ============================================================================
+
+\chapter{TỔNG QUAN}
+\label{ch:overview}
+
+\section{Bối cảnh kiến trúc: từ một khối đến vi dịch vụ trên Kubernetes}
+\label{sec:arch-context}
+
+Phần này làm rõ \emph{vì sao} bài toán
+giám sát an ninh trong đồ án lại đặt ra trên môi trường Kubernetes chứ không phải trên
+hạ tầng truyền thống, và \emph{vì sao} cách quan sát phải đặt ở tầng nhân. Lý do nằm ở
+sự dịch chuyển kiến trúc phần mềm trong một thập kỷ qua: từ kiến trúc \emph{một khối}
+(\textit{monolithic}) chạy trên máy chủ vật lý, sang kiến trúc \emph{vi dịch vụ}
+(\textit{microservices}) đóng gói trong container và điều phối bởi Kubernetes. Sự dịch
+chuyển này không chỉ thay đổi cách phần mềm được xây dựng và mở rộng mà còn làm thay đổi
+căn bản \emph{bề mặt tấn công}, khiến các biện pháp an ninh truyền thống trở nên kém hiệu
+quả --- đó chính là khoảng trống mà đồ án hướng tới.
+
+\subsection{Kiến trúc một khối và mở rộng theo chiều dọc}
+
+Trong kiến trúc một khối, toàn bộ chức năng của ứng dụng --- từ tầng giao diện, tầng
+nghiệp vụ đến tầng truy cập dữ liệu --- được biên dịch và triển khai như \emph{một tiến
+trình duy nhất} chạy trên một máy chủ (vật lý hoặc máy ảo) như minh họa ở
+Hình~\ref{fig:arch-monolith}. Đặc điểm quan trọng nhất xét từ góc độ an ninh là: các lời
+gọi giữa các tầng diễn ra \emph{trong cùng một tiến trình} (in-process), tức không đi qua
+mạng. Hệ quả là gần như toàn bộ luồng dữ liệu nội bộ của ứng dụng nằm gọn bên trong một
+máy chủ và không hề xuất hiện trên dây mạng để có thể bị quan sát. Khi cần phục vụ nhiều
+người dùng hơn, mô hình này mở rộng \emph{theo chiều dọc} (\textit{vertical scaling}):
+nâng cấp phần cứng (thêm CPU, RAM) cho chính máy chủ đó. Cách mở rộng này đơn giản nhưng
+có trần vật lý và tạo ra một điểm hỏng tập trung.
+
+Trong mô hình này, an ninh được tổ chức theo nguyên lý \emph{phòng thủ chu vi}
+(\textit{perimeter security}): một tường lửa hoặc hệ thống phát hiện xâm nhập đặt ở
+\emph{biên mạng}, kiểm soát lưu lượng ra vào giữa Internet và máy chủ --- thường gọi là
+lưu lượng \emph{Bắc--Nam}. Vì luồng nội bộ là in-process, mô hình phòng thủ chu vi này
+là \emph{đủ}: kẻ tấn công muốn tới được dữ liệu phải vượt qua biên, và biên là nơi duy
+nhất cần canh gác.
+
+\begin{figure}[H]
+  \centering
+  \resizebox{0.82\linewidth}{!}{\input{../shared/figures/arch-monolith}}
+  \caption{Kiến trúc một khối (monolith) truyền thống.}
+  \label{fig:arch-monolith}
+\end{figure}
+
+\subsection{Kiến trúc vi dịch vụ trên Kubernetes và mở rộng theo chiều ngang}
+
+Kiến trúc vi dịch vụ phân rã ứng dụng thành nhiều dịch vụ nhỏ, độc lập, mỗi dịch vụ đóng
+gói trong một container và được điều phối bởi Kubernetes \cite{berardi2022microservice}.
+Như Hình~\ref{fig:arch-micro} thể hiện, các dịch vụ này chạy phân tán trên nhiều nút
+(\textit{node}) của cụm và giao tiếp với nhau \emph{qua mạng} thông qua một mạng phủ
+(\textit{overlay network}) phẳng. Mô hình mở rộng \emph{theo chiều ngang} (\textit{horizontal
+scaling}): thay vì nâng cấp một máy, hệ thống nhân bản thêm các bản sao pod hoặc thêm nút
+vào cụm. Điều này mang lại độ co giãn và khả năng chịu lỗi cao hơn hẳn, là lý do kiến trúc
+này trở thành tiêu chuẩn thực tế cho các hệ thống quy mô lớn hiện đại.
+
+Tuy nhiên, chính sự phân tán này sinh ra một loại lưu lượng mới mà mô hình một khối không
+có: lưu lượng \emph{Đông--Tây} --- các lời gọi dịch vụ-tới-dịch vụ (pod-tới-pod) đi
+\emph{qua mạng} bên trong cụm. Trong một hệ thống vi dịch vụ thực tế, lưu lượng Đông--Tây
+thường lớn hơn nhiều lần lưu lượng Bắc--Nam. Mỗi pod giờ đây vừa là một điểm có thể bị
+khai thác, vừa là một bàn đạp để kẻ tấn công \emph{dịch chuyển ngang} (\textit{lateral
+movement}) sang các pod khác. Vòng đời pod ngắn và địa chỉ IP thay đổi liên tục càng làm
+cho việc theo dõi trở nên khó khăn.
+
+\begin{figure}[H]
+  \centering
+  \resizebox{0.92\linewidth}{!}{\input{../shared/figures/arch-microservices}}
+  \caption{Kiến trúc vi dịch vụ trên Kubernetes.}
+  \label{fig:arch-micro}
+\end{figure}
+
+\subsection{Quét cổng và dịch chuyển ngang: định nghĩa và mô hình phát hiện}
+\label{subsec:threat-defs}
+
+Trên bề mặt Đông--Tây vừa mô tả, hai hành vi tấn công là trọng tâm của đồ án. Mục này
+định nghĩa chúng một cách chính xác và --- quan trọng hơn --- chỉ ra \emph{tín hiệu} mà
+mỗi hành vi để lại, vì chính các tín hiệu này quyết định giải thuật phát hiện được dùng ở
+các mục sau.
+
+\paragraph{Quét cổng (\textit{port scanning}).} Là hành vi một nguồn lần lượt thử kết nối
+tới nhiều cổng (quét \emph{dọc} trên một đích) hoặc nhiều đích (quét \emph{ngang} trên một
+cổng) nhằm lập bản đồ các dịch vụ đang mở. Trong cụm Kubernetes, đây thường là bước
+\emph{trinh sát} đầu tiên sau khi kẻ tấn công kiểm soát được một pod: từ pod đó, chúng dò
+quét các pod và dịch vụ lân cận để tìm điểm khai thác tiếp theo. Dấu hiệu đặc trưng của
+quét cổng, nhìn từ tầng nhân, là \emph{một nguồn tạo ra số lượng kết nối tăng vọt bất
+thường} trong một khoảng thời gian ngắn (Hình~\ref{fig:threat-patterns}, trái). Tín hiệu
+này có bản chất \emph{tần suất}, và đó chính là lý do hệ thống dùng cấu trúc ước lượng tần
+suất Count-Min Sketch (Mục~\ref{sec:theory-cms}) để bắt nó với chi phí bộ nhớ thấp.
+
+\paragraph{Dịch chuyển ngang (\textit{lateral movement}).} Là giai đoạn kẻ tấn công, sau
+khi chiếm một pod, lần lượt mở rộng quyền kiểm soát sang các pod khác để tiến gần tới mục
+tiêu giá trị cao (ví dụ cơ sở dữ liệu). Khác với quét cổng vốn lộ ra ở \emph{tần suất},
+dịch chuyển ngang lộ ra ở \emph{cấu trúc} của lưu lượng: xuất hiện những chuỗi hoặc chu
+trình liên lạc pod-tới-pod bất thường (Hình~\ref{fig:threat-patterns}, phải). Một nhóm pod
+liên lạc vòng tròn với nhau là một dấu hiệu đáng ngờ, và phạm vi mà một pod bị chiếm có
+thể với tới trong vài bước cho biết mức độ nghiêm trọng của sự cố.
+
+\begin{figure}[H]
+  \centering
+  \resizebox{0.92\linewidth}{!}{\input{../shared/figures/threat-patterns}}
+  \caption{Hai mẫu hành vi tấn công và tín hiệu tương ứng.}
+  \label{fig:threat-patterns}
+\end{figure}
+
+\paragraph{Mô hình phát hiện thống nhất.} Hai tín hiệu trên được nắm bắt trên cùng một
+biểu diễn: mô hình hóa lưu lượng nội cụm thành một \emph{đồ thị truyền thông} có hướng
+$G=(V,E)$, trong đó mỗi đỉnh là một địa chỉ (pod, dịch vụ, nút) và mỗi cung là một kết nối
+đã quan sát được. Trên biểu diễn này, bài toán phát hiện tách thành hai nhánh bổ trợ:
+(i) \emph{nhánh tần suất} --- ước lượng số kết nối phát ra từ mỗi đỉnh nguồn để phát hiện
+quét cổng, giải bằng Count-Min Sketch; và (ii) \emph{nhánh cấu trúc} --- phân tích quan hệ
+giữa các đỉnh để phát hiện dịch chuyển ngang, giải bằng giải thuật Tarjan (tìm thành phần
+liên thông mạnh) và duyệt BFS theo $k$ bước (ước lượng bán kính ảnh hưởng), trình bày ở
+Mục~\ref{sec:graph-ip}. Việc tách bài toán theo hai loại tín hiệu như vậy là kim chỉ nam cho phần cơ sở giải thuật ở Chương~\ref{ch:foundations}.
+
+\subsection{Hệ quả an ninh và lý do quan sát ở tầng nhân}
+\label{subsec:why-kernel}
+
+Đặt hai kiến trúc cạnh nhau, có thể thấy ngay vì sao phòng thủ chu vi truyền thống không
+còn đủ. Tường lửa biên mạng chỉ thấy lưu lượng Bắc--Nam và gần như \emph{mù} trước toàn bộ
+lưu lượng Đông--Tây nội cụm --- đúng nơi mà hành vi quét cổng và dịch chuyển ngang diễn ra.
+Khi kẻ tấn công đã chiếm được một pod, chúng có thể tự do dò quét và lan sang các pod khác
+mà không một lần nào phải đi qua biên. Đây là lý do mô hình an ninh hiện đại chuyển sang
+nguyên lý \emph{Zero-Trust} \cite{nist800207}: không mặc nhiên tin tưởng lưu lượng nội bộ,
+phải quan sát và kiểm soát \emph{mọi} kết nối kể cả bên trong vành đai. Các báo cáo công
+nghiệp gần đây xác nhận rủi ro này: cấu hình sai và thiếu khả năng quan sát nội cụm là
+nhóm nguyên nhân hàng đầu của sự cố an ninh Kubernetes
+\cite{redhat2024k8ssec,wiz2025k8ssec,pereiravale2021security}.
+
+Vấn đề kế tiếp là \emph{quan sát ở đâu}. Có ba lựa chọn quen thuộc, mỗi lựa chọn một nhược
+điểm trong môi trường vi dịch vụ: (i) cài tác nhân giám sát vào \emph{từng ứng dụng} ---
+xâm lấn, phụ thuộc ngôn ngữ lập trình và phải sửa từng dịch vụ; (ii) chèn một
+\textit{sidecar} proxy cạnh mỗi pod --- tốn tài nguyên và chỉ thấy lưu lượng tầng ứng dụng
+đã được định tuyến qua nó; (iii) phản chiếu (\textit{mirror}) toàn bộ gói tin trên mạng ---
+chi phí lớn và khó truy ngữ cảnh tiến trình. Cả ba đều không lý tưởng. Trong khi đó, có một
+điểm quan sát \emph{tự nhiên} mà mọi kết nối đều phải đi qua: \emph{nhân của hệ điều hành}
+trên mỗi nút. Vì mọi kết nối TCP của mọi pod đều được xử lý bởi nhân của nút chứa pod đó,
+một chương trình đặt tại tầng nhân sẽ quan sát được trọn vẹn lưu lượng Đông--Tây mà không
+cần sửa ứng dụng, không phụ thuộc ngôn ngữ và chỉ cần hiện diện một lần trên mỗi nút. Công
+nghệ cho phép làm điều đó một cách an toàn và hiệu năng cao chính là \textbf{eBPF}, được trình bày ở Chương~\ref{ch:foundations}. Như vậy, lựa chọn quan sát tầng nhân không phải ngẫu nhiên
+mà là hệ quả trực tiếp của đặc thù kiến trúc vi dịch vụ trên Kubernetes.
+
+\section{Khảo sát nhu cầu thực tế tại doanh nghiệp}
+\label{sec:survey-enterprise}
+
+Đề tài không xuất phát từ một giả định lý thuyết thuần túy mà bắt nguồn từ một nhu cầu
+vận hành có thật, được ghi nhận qua quá trình khảo sát tại một doanh nghiệp đang vận hành
+nền tảng Kubernetes nội bộ. Mục này trình bày môi trường khảo sát, phương pháp thu thập
+yêu cầu, hiện trạng giám sát an ninh và các điểm đau, từ đó tổng hợp thành tập nhu cầu
+làm đầu vào cho phần phân tích yêu cầu (Mục~\ref{sec:requirements}). Việc hiểu rõ bài
+toán thực tế là cơ sở để bảo đảm hệ thống được thiết kế đúng nhu cầu thay vì xuất phát
+từ giả định.
+
+Về phương pháp luận, đồ án tuân theo quy trình \emph{kỹ nghệ yêu cầu}
+(\textit{requirements engineering}) gồm bốn bước nối tiếp: (i) \emph{khơi gợi}
+(\textit{elicitation}) --- thu thập thông tin từ các bên liên quan và hiện trạng; (ii)
+\emph{phân tích} (\textit{analysis}) --- chưng cất thông tin thô thành nhu cầu và xác định
+mâu thuẫn, ưu tiên; (iii) \emph{đặc tả} (\textit{specification}) --- phát biểu thành yêu
+cầu chức năng và phi chức năng có thể truy vết; và (iv) \emph{thẩm định}
+(\textit{validation}) --- đối chiếu yêu cầu với khảo sát học thuật, công nghiệp và đánh giá
+khả thi. Chương này thực hiện trọn bốn bước đó: hai bước đầu nằm ở Mục~\ref{sec:survey-enterprise}
+và Mục~\ref{sec:threat-killchain}, bước đặc tả ở Mục~\ref{sec:requirements}, và bước thẩm
+định trải trên các mục khảo sát và đánh giá khả thi. Kết quả --- tập yêu cầu --- sau đó
+được \emph{phân tích chi tiết thành thiết kế} ở Chương~\ref{ch:design}, đúng theo sự phân
+vai giữa ``xác định cần gì'' (chương này) và ``thiết kế làm thế nào'' (Chương~\ref{ch:design}).
+
+\subsection{Môi trường và quy mô khảo sát}
+\label{subsec:env-survey}
+
+Doanh nghiệp được khảo sát vận hành một cụm Kubernetes triển khai trên hạ tầng nội bộ
+(\textit{on-premise}), không dùng dịch vụ Kubernetes do nhà cung cấp đám mây quản lý (như
+EKS, GKE hay AKS). Quy mô cụm ở mức lớn: hơn \textbf{một nghìn} đối tượng \texttt{Deployment}
+thuộc nhiều nhóm sản phẩm, tương ứng hàng nghìn pod hoạt động đồng thời, phân bố trên
+nhiều không gian tên (\textit{namespace}) theo từng đội phát triển. Mạng pod do CNI
+\emph{Calico} đảm nhiệm --- một lựa chọn cho phép thực thi \texttt{NetworkPolicy} ở tầng
+mạng --- song trên thực tế phần lớn không gian tên vẫn áp dụng chính sách mặc định
+cho-phép-rộng, bởi đội vận hành \emph{thiếu thông tin về thực tế giao tiếp giữa các dịch
+vụ} để có thể siết chặt chính sách một cách an toàn.
+
+Về tổ chức, cụm được chia theo nhiều không gian tên ứng với từng đội sản phẩm và từng môi
+trường (phát triển, kiểm thử, sản xuất). Các dịch vụ rất đa dạng về công nghệ --- nhiều
+ngôn ngữ và khung lập trình cùng tồn tại --- và giao tiếp với nhau dày đặc theo mô hình
+đông--đông: một yêu cầu của người dùng có thể kích hoạt một chuỗi nhiều lời gọi nội bộ
+giữa các dịch vụ. Vòng đời pod ngắn (pod được tạo và hủy liên tục theo nhịp triển khai và
+co giãn), kéo theo địa chỉ IP của pod thay đổi thường xuyên, khiến mọi cơ chế giám sát gắn
+cứng theo địa chỉ đều nhanh chóng lỗi thời.
+
+Về an ninh và quan trắc, doanh nghiệp đang dùng \emph{Wazuh} làm nền tảng giám sát chính.
+Wazuh thu thập nhật ký, kiểm tra toàn vẹn tệp và giám sát sự kiện ở mức \emph{máy chủ}
+(host) trên các nút, kết hợp với một số công cụ quản lý nhật ký tập trung và giám sát số
+liệu (Prometheus/Grafana). Ở biên hệ thống có tường lửa và thiết bị kiểm soát lưu lượng
+Bắc--Nam. Cách bố trí này hiệu quả với các mối đe dọa đi qua biên, nhưng có một giả định
+ngầm không còn đúng trong môi trường vi dịch vụ: rằng quan sát ở tầng máy chủ và biên mạng
+là \emph{đủ}. Điểm mấu chốt là toàn bộ lớp giám sát hiện có dừng ở \emph{ranh giới máy chủ
+và biên mạng} --- nó hầu như không nhìn thấy lưu lượng mạng \emph{giữa các pod} bên trong
+cụm, vốn là nơi diễn ra phần lớn hoạt động của một hệ vi dịch vụ quy mô lớn. Với hơn một
+nghìn deployment, số lượng cặp dịch vụ có thể giao tiếp là rất lớn, và việc không có bản đồ
+giao tiếp khiến cả đội an ninh lẫn đội nền tảng phải làm việc trong điều kiện thiếu thông
+tin căn bản.
+
+\subsection{Phương pháp khảo sát và thu thập yêu cầu}
+\label{subsec:survey-method}
+
+Quá trình thu thập yêu cầu được thực hiện theo cách tiếp cận quen thuộc của kỹ nghệ phần
+mềm, kết hợp ba nguồn dữ liệu để giảm thiên lệch. Thứ nhất là \emph{phỏng vấn bán cấu
+trúc} (\textit{semi-structured interview}) các bên liên quan; danh sách bên liên quan và
+mối quan tâm chính được tóm tắt ở Bảng~\ref{tab:stakeholders}. Thứ hai là \emph{quan sát
+hiện trạng}: rà soát cấu hình các công cụ giám sát đang dùng, các \texttt{NetworkPolicy}
+hiện hành và bản đồ namespace của cụm. Thứ ba là \emph{phân tích sự cố quá khứ} để hiểu
+những tình huống mà khả năng phát hiện hiện tại đã bỏ sót. Các câu hỏi phỏng vấn xoay
+quanh bốn trục: khả năng nhìn thấy lưu lượng nội cụm, khả năng phát hiện hành vi bất
+thường, quy trình ứng phó sự cố, và các ràng buộc về tài nguyên và vận hành. Cụ thể, một
+số câu hỏi tiêu biểu được đặt ra gồm: ``Khi một dịch vụ bị nghi ngờ tổn hại, đội có thể
+biết nó đã kết nối tới những dịch vụ nào không?''; ``Hiện có cảnh báo nào khi một pod đột
+ngột tạo nhiều kết nối tới nhiều đích khác nhau không?''; ``Quy trình cách ly một pod khi
+xảy ra sự cố hiện diễn ra thế nào và mất bao lâu?''; và ``Ràng buộc nào khiến việc cài
+thêm tác nhân giám sát vào ứng dụng trở nên khó khăn?''.
+
+Tổng hợp câu trả lời cho thấy một bức tranh nhất quán giữa các vai trò. Đội an ninh xác
+nhận họ \emph{không} trả lời được câu hỏi về quan hệ kết nối nội cụm và \emph{không} có
+cảnh báo cho hành vi dò quét bên trong; đội nền tảng nhấn mạnh rằng cài tác nhân vào hơn
+một nghìn deployment đa ngôn ngữ là không khả thi về công sức bảo trì; đội vận hành lo ngại
+mọi cơ chế cách ly tự động vì rủi ro chặn nhầm dịch vụ hợp lệ ở quy mô lớn; còn lập trình
+viên mong muốn giải pháp ``trong suốt'' với mã ứng dụng. Những phát hiện này về sau định
+hình trực tiếp các yêu cầu phi chức năng (không xâm lấn, an toàn khi phản hồi) ở
+Mục~\ref{sec:requirements}.
+
+\begin{table}[H]
+  \centering
+  \caption{Các bên liên quan được phỏng vấn và mối quan tâm chính.}
+  \label{tab:stakeholders}
+  \small
+  \begin{tabularx}{\linewidth}{@{}l l X@{}}
+    \toprule
+    \textbf{Vai trò} & \textbf{Viết tắt} & \textbf{Mối quan tâm chính} \\
+    \midrule
+    Kỹ sư an ninh        & SecOps   & Phát hiện tấn công nội cụm, ứng phó sự cố, bằng chứng kiểm toán \\
+    Kỹ sư nền tảng       & DevOps   & Chi phí tài nguyên, độ phức tạp vận hành, khả năng tái lập \\
+    Kỹ sư vận hành       & SRE      & Tác động hiệu năng, độ ổn định, tránh báo động giả gây gián đoạn \\
+    Lập trình viên       & Dev      & Không phải sửa mã ứng dụng, không phụ thuộc ngôn ngữ \\
+    \bottomrule
+  \end{tabularx}
+\end{table}
+
+\subsection{Hiện trạng giám sát và các điểm đau}
+\label{subsec:pain-points}
+
+Tổng hợp từ ba nguồn khảo sát, hiện trạng giám sát an ninh nội cụm bộc lộ một số điểm đau
+(\textit{pain point}) nổi bật, được liệt kê ở Bảng~\ref{tab:pain-points}. Điểm đau bao
+trùm và nghiêm trọng nhất là \emph{mù lưu lượng Đông--Tây}: vì Wazuh và các công cụ hiện
+có chỉ quan sát ở tầng máy chủ, đội an ninh không trả lời được câu hỏi cơ bản ``dịch vụ
+nào đang nói chuyện với dịch vụ nào''. Hệ quả dây chuyền là không thể phát hiện hành vi
+quét cổng hay dịch chuyển ngang khi kẻ tấn công đã ở \emph{bên trong} cụm, cũng không thể
+ước lượng bán kính ảnh hưởng khi một pod bị nghi ngờ chiếm quyền. Đáng chú ý, đây vừa là
+bài toán an ninh vừa là bài toán vận hành: chính sự thiếu vắng bản đồ giao tiếp khiến đội
+nền tảng không dám siết \texttt{NetworkPolicy} của Calico, tạo thành một vòng luẩn quẩn
+giữa khả năng quan sát và khả năng kiểm soát. Hình~\ref{fig:current-gap} minh họa hiện
+trạng này: lớp giám sát hiện có bao phủ được trục Bắc--Nam, nhưng toàn bộ lưu lượng
+Đông--Tây giữa các pod nằm trong một \emph{vùng mù}.
+
+\begin{figure}[H]
+  \centering
+  \resizebox{0.82\linewidth}{!}{\input{../shared/figures/current-gap}}
+  \caption{Hiện trạng giám sát và vùng mù Đông--Tây tại doanh nghiệp.}
+  \label{fig:current-gap}
+\end{figure}
+
+\begin{table}[H]
+  \centering
+  \caption{Các điểm đau ghi nhận từ khảo sát hiện trạng.}
+  \label{tab:pain-points}
+  \small
+  \begin{tabularx}{\linewidth}{@{}l l X@{}}
+    \toprule
+    \textbf{Mã} & \textbf{Điểm đau} & \textbf{Mô tả} \\
+    \midrule
+    P1 & Mù lưu lượng Đông--Tây   & Không thấy giao tiếp pod-tới-pod; chỉ giám sát ở tầng host (Wazuh) và biên mạng \\
+    P2 & Thiếu bản đồ phụ thuộc   & Không biết dịch vụ nào gọi dịch vụ nào nên không siết được \texttt{NetworkPolicy} \\
+    P3 & Tác nhân theo pod bất khả thi & Cài agent vào hơn 1000 deployment là tốn kém, phụ thuộc ngôn ngữ, khó bảo trì \\
+    P4 & Ứng phó thủ công, chậm   & Khi nghi ngờ sự cố, việc cách ly pod làm thủ công, không có quy trình tự động có kiểm soát \\
+    P5 & Thiếu bằng chứng kiểm toán & Không có dấu vết ``ai kết nối tới ai'' trong cụm phục vụ điều tra và tuân thủ \\
+    \bottomrule
+  \end{tabularx}
+\end{table}
+
+\subsection{Tổng hợp nhu cầu}
+\label{subsec:needs}
+
+Từ các điểm đau, quá trình khảo sát chưng cất ra một tập \emph{nhu cầu}
+(Bảng~\ref{tab:needs}) --- là phát biểu ``cần gì'' ở mức nghiệp vụ, độc lập với giải pháp
+kỹ thuật. Tập nhu cầu này định hình \emph{miền bài toán} (domain) thực sự mà đồ án phải
+giải quyết, và sẽ được chuyển hóa thành các yêu cầu chức năng và phi chức năng cụ thể ở
+Mục~\ref{sec:requirements}, rồi tiếp tục được phân tích chi tiết thành thiết kế ở
+Chương~\ref{ch:design}.
+
+\begin{table}[H]
+  \centering
+  \caption{Tổng hợp nhu cầu chưng cất từ các điểm đau.}
+  \label{tab:needs}
+  \small
+  \begin{tabularx}{\linewidth}{@{}l X l@{}}
+    \toprule
+    \textbf{Mã} & \textbf{Nhu cầu} & \textbf{Đáp ứng điểm đau} \\
+    \midrule
+    N1 & Quan sát lưu lượng kết nối toàn cụm với chi phí thấp, \emph{không} cài tác nhân vào từng pod & P1, P3 \\
+    N2 & Phát hiện trực tuyến hành vi quét cổng và dịch chuyển ngang & P1 \\
+    N3 & Dựng bản đồ giao tiếp giữa các dịch vụ và ước lượng bán kính ảnh hưởng & P2 \\
+    N4 & Ứng phó cách ly tự động \emph{có người duyệt}, tận dụng \texttt{NetworkPolicy} của Calico sẵn có & P2, P4 \\
+    N5 & Lưu vết kiểm toán đầy đủ phục vụ điều tra và tuân thủ & P5 \\
+    \bottomrule
+  \end{tabularx}
+\end{table}
+
+\section{Mô hình mối đe dọa: chuỗi tấn công nội cụm}
+\label{sec:threat-killchain}
+
+Để hiểu vì sao các nhu cầu trên lại tập trung vào giai đoạn ``bên trong'' cụm, cần đặt
+chúng vào một mô hình mối đe dọa. Một cuộc tấn công vào hệ vi dịch vụ thường diễn ra theo
+một chuỗi giai đoạn (\textit{kill-chain}) như Hình~\ref{fig:kill-chain}: sau khi
+\emph{xâm nhập ban đầu} qua một pod lộ lỗ hổng (giai đoạn~1), kẻ tấn công \emph{trinh sát}
+bằng cách quét cổng các pod và dịch vụ lân cận (giai đoạn~2), rồi \emph{dịch chuyển ngang}
+từ pod này sang pod khác (giai đoạn~3) để tiến tới \emph{mục tiêu giá trị cao} như cơ sở
+dữ liệu hay kho bí mật (giai đoạn~4), và cuối cùng \emph{tác động} bằng việc rò rỉ hay phá
+hoại dữ liệu (giai đoạn~5).
+
+\begin{figure}[H]
+  \centering
+  \resizebox{0.96\linewidth}{!}{\input{../shared/figures/kill-chain}}
+  \caption{Chuỗi tấn công (kill-chain) nội cụm và vùng phát hiện của đồ án.}
+  \label{fig:kill-chain}
+\end{figure}
+
+Điểm mấu chốt là an ninh chu vi truyền thống chỉ kiểm soát được hai đầu của chuỗi: ngăn
+xâm nhập ban đầu ở biên (giai đoạn~1) và chặn rò rỉ ra ngoài (giai đoạn~5). Toàn bộ phần
+\emph{giữa} --- trinh sát và dịch chuyển ngang --- diễn ra hoàn toàn trong lưu lượng
+Đông--Tây và vô hình trước lớp giám sát hiện tại của doanh nghiệp. Đây chính xác là khoảng
+mà đồ án nhắm tới: phát hiện \emph{sớm} ở giai đoạn~2--3, khi kẻ tấn công vừa mới bắt đầu
+dò quét và lan tỏa, để ngăn chặn trước khi chúng chạm tới mục tiêu. Hai giai đoạn này để
+lại hai loại tín hiệu bổ trợ đã nêu ở Mục~\ref{subsec:threat-defs} (tần suất kết nối và
+cấu trúc đồ thị giao tiếp), và đó là nền tảng cho cách tiếp cận phát hiện của hệ thống.
+
+\subsection{Kịch bản minh họa trong bối cảnh doanh nghiệp}
+
+Để cụ thể hóa, hãy xét một kịch bản đặt trong đúng môi trường đã khảo sát. Một pod chạy
+dịch vụ web đối mặt người dùng tồn tại lỗ hổng và bị kẻ tấn công kiểm soát (giai đoạn~1).
+Từ chỗ đứng này, kẻ tấn công không tấn công thẳng ra biên --- nơi vẫn được tường lửa canh
+gác --- mà quay vào trong: chạy một công cụ quét cổng nhắm tới dải địa chỉ pod của các
+namespace lân cận để tìm dịch vụ đang mở (giai đoạn~2). Với lớp giám sát hiện tại, hàng
+trăm lượt kết nối dò quét này hòa lẫn vào lưu lượng Đông--Tây và \emph{không} sinh ra cảnh
+báo nào, bởi Wazuh chỉ thấy sự kiện ở tầng host. Phát hiện được mẫu đang mở, kẻ tấn công
+lần lượt kết nối sang một pod xử lý nội bộ rồi sang pod cơ sở dữ liệu (giai đoạn~3--4),
+hình thành một chuỗi liên lạc pod-tới-pod bất thường mà không công cụ nào trong cụm ghi
+nhận.
+
+Đặt cạnh nhau, kịch bản này làm lộ rõ hai cơ hội phát hiện mà hệ thống đề xuất khai thác.
+Thứ nhất, ở giai đoạn trinh sát, pod tấn công tạo ra một \emph{số lượng kết nối tăng vọt}
+trong thời gian ngắn --- một dị thường về tần suất mà bộ đếm Count-Min Sketch nắm bắt được
+ngay khi sự kiện vừa sinh ra. Thứ hai, ở giai đoạn dịch chuyển ngang, chuỗi pod bị chiếm
+tạo ra một \emph{cấu trúc liên thông bất thường} trên đồ thị giao tiếp mà giải thuật đồ thị
+phát hiện được, đồng thời cho phép ước lượng bán kính ảnh hưởng để ưu tiên xử lý. Chính
+việc một sự kiện đơn lẻ đã đủ để kích hoạt tín hiệu tần suất, còn cấu trúc đồ thị bổ sung
+bức tranh quan hệ, là lý do hệ thống có thể can thiệp \emph{trước} khi kẻ tấn công chạm
+tới mục tiêu --- điều mà lớp giám sát theo lô, hướng host hiện tại không làm được.
+
+\section{Khảo sát hiện trạng và khoảng trống nghiên cứu}
+
+\subsection{Bằng chứng từ ba bài tổng quan có hệ thống gần đây}
+
+Nhu cầu thực tế ghi nhận ở doanh nghiệp không phải là một trường hợp cá biệt. Để đặt nó
+vào bức tranh chung và bảo đảm đề tài không xuất phát từ giả định chủ quan, đồ án đối
+chiếu với \textbf{ba bài khảo sát có hệ thống} (\textit{systematic literature review}, SLR)
+gần nhất về an toàn thông tin của hệ vi dịch vụ trên Kubernetes. SLR là phương pháp tổng
+quan tài liệu theo quy trình minh bạch (xác định câu hỏi, sàng lọc theo tiêu chí, tổng hợp
+có hệ thống), nên kết luận của chúng có độ tin cậy cao hơn các bài tổng quan thông thường.
+Ba công trình dưới đây bổ sung cho nhau cả về quy mô khảo sát lẫn góc nhìn:
+
+\textbf{Hutasuhut và cộng sự (2024)} \cite{hutasuhut2024gap} sàng lọc 487 công bố trong
+giai đoạn sau năm 2020 và chọn lại 87 bài bằng phương pháp snowball. Nhóm tác giả kết luận
+rằng vẫn thiếu vắng đáng kể các chuẩn bảo mật riêng và các mô hình toàn diện được thiết kế
+\emph{đặc biệt} cho vi dịch vụ, đồng thời tồn tại một khoảng cách kiến thức rõ rệt giữa giới
+học thuật và giới thực hành công nghiệp. Khoảng cách này trùng khớp với điều quan sát được ở
+doanh nghiệp: các đội vận hành biết mình thiếu khả năng quan sát nội cụm nhưng không có một
+mô hình tham chiếu sẵn để áp dụng.
+
+\textbf{Berardi và cộng sự (2022)} \cite{berardi2022microservice} khảo sát 290 công bố và
+xác định bốn khoảng trống cốt lõi: thiếu hướng dẫn áp dụng \textit{security-by-design} cho
+kiến trúc vi dịch vụ; thiếu mô hình mối đe dọa chuyên biệt; thiếu hướng dẫn xử lý bề mặt
+tấn công sinh ra từ sự đa dạng công nghệ; và các vấn đề an toàn khi di trú từ hệ đơn khối
+sang vi dịch vụ. Đáng chú ý, ba trong bốn khoảng trống này liên quan trực tiếp tới mô hình
+mối đe dọa và bề mặt tấn công --- đúng phần mà đồ án tập trung làm rõ qua chuỗi kill-chain
+và hai mẫu hành vi quét cổng, dịch chuyển ngang.
+
+\textbf{Pereira-Vale và cộng sự (2021)} \cite{pereiravale2021security} thực hiện một bài
+tổng quan đa nguồn (\textit{multivocal review}) kết hợp 36 công bố học thuật với 34 nguồn
+xám (báo cáo công nghiệp, tài liệu kỹ thuật của các nhà cung cấp lớn). Kết quả cho thấy
+một sự lệch pha hai chiều: nhiều giải pháp được công nghiệp triển khai chưa có cơ sở lý
+thuyết được kiểm chứng, trong khi nhiều phân tích lý thuyết lại chưa được hiện thực hóa
+trong hệ thống thực. Chính sự lệch pha này củng cố cho định hướng của đồ án --- gắn chặt
+mỗi giải thuật cốt lõi với cơ sở lý thuyết \emph{và} một hiện thực đo được trên cụm thật.
+
+\subsection{Đối chiếu với báo cáo công nghiệp gần đây}
+
+Để đối chiếu kết luận học thuật với thực tế triển khai, đồ án tham chiếu hai báo cáo công nghiệp gần nhất:
+
+\begin{itemize}
+  \item \textit{The State of Kubernetes Security 2024} của Red Hat \cite{redhat2024k8ssec}, dựa trên khảo sát 600 chuyên gia DevOps và an toàn thông tin: \textbf{67\%} tổ chức đã trì hoãn hoặc làm chậm phát triển ứng dụng do lo ngại an ninh; \textbf{45\%} gặp sự cố ở giai đoạn \textit{runtime} trong 12 tháng gần nhất; \textbf{30\%} bị phạt và \textbf{46\%} chịu mất doanh thu hoặc khách hàng sau sự cố.
+  \item \textit{Kubernetes Security Report 2025} của Wiz \cite{wiz2025k8ssec} bổ sung số liệu thời gian: một cluster K8s mới tạo trên dịch vụ managed (AKS, EKS) bị tấn công thử lần đầu trong vòng 18--28 phút sau khi sẵn sàng, cho thấy ``đầu vào đối kháng'' không phải tình huống hiếm gặp mà là điều kiện vận hành mặc định.
+\end{itemize}
+
+Bảng~\ref{tab:survey-data} tổng hợp các con số tiêu biểu từ các nguồn khảo sát trên,
+cho thấy an ninh Kubernetes vừa là vấn đề phổ biến vừa có hậu quả kinh doanh rõ rệt --- một
+luận cứ định lượng củng cố cho nhu cầu thực tế đã ghi nhận ở
+Mục~\ref{sec:survey-enterprise}.
+
+\begin{table}[H]
+  \centering
+  \caption{Một số số liệu tiêu biểu về an ninh Kubernetes từ các khảo sát gần đây.}
+  \label{tab:survey-data}
+  \small
+  \begin{tabularx}{\linewidth}{@{}l l X@{}}
+    \toprule
+    \textbf{Nguồn} & \textbf{Số liệu} & \textbf{Ý nghĩa} \\
+    \midrule
+    Hutasuhut 2024 \cite{hutasuhut2024gap} & 487 $\rightarrow$ 87 bài & Thiếu chuẩn bảo mật riêng và mô hình toàn diện cho vi dịch vụ \\
+    Berardi 2022 \cite{berardi2022microservice} & 290 bài, 4 khoảng trống & Thiếu security-by-design và mô hình mối đe dọa chuyên biệt \\
+    Red Hat 2024 \cite{redhat2024k8ssec} & 67\% / 45\% / 30\% / 46\% & Trì hoãn phát hành / sự cố runtime / bị phạt / mất doanh thu \\
+    Wiz 2025 \cite{wiz2025k8ssec} & 18--28 phút & Thời gian tới lần dò quét đầu tiên của một cụm mới \\
+    \bottomrule
+  \end{tabularx}
+\end{table}
+
+\subsection{Khoảng trống cụ thể mà đồ án nhắm tới}
+
+Khi đặt ba nguồn khảo sát cạnh nhau --- nhu cầu thực tế của doanh nghiệp, các bài tổng
+quan học thuật và các công cụ công nghiệp --- chúng hội tụ về cùng một khoảng trống. Từ
+phía \emph{doanh nghiệp}, đó là sự mù lưu lượng Đông--Tây và vòng luẩn quẩn quan
+sát -- kiểm soát. Từ phía \emph{học thuật}, đó là sự thiếu vắng mô hình mối đe dọa chuyên
+biệt và kiến trúc tham chiếu cho vi dịch vụ. Từ phía \emph{công cụ}, đó là việc mỗi công cụ
+chỉ giải quyết một mảnh và hiếm khi lấy cấu trúc dữ liệu luồng làm trọng tâm phát hiện.
+
+Tổng hợp lại, đồ án xác định một \textit{trục} khoảng trống cụ thể: thiếu một \textbf{kiến
+trúc tham chiếu hoàn chỉnh} kết nối từ tầng nhân (thu thập sự kiện mạng), qua tầng cấu trúc
+dữ liệu (giải thuật tần suất, đồ thị), tới tầng dịch vụ (phát hiện sự cố, phản ứng) và giao
+diện vận hành (dashboard và console). Hầu hết các giải pháp công cụ hiện có (như Cilium
+Hubble, Falco, Tetragon) tập trung vào một mảnh và không cho thấy cách các mảnh đó được
+\textit{ráp lại} thành một quy trình giám sát Zero-Trust khép kín. Đồ án nhằm bù đắp đúng
+khoảng trống này bằng cách xây dựng và đánh giá một hệ tham chiếu đầu cuối, được thiết kế
+để các thành phần lý thuyết và kỹ thuật có thể được tách rời và tái sử dụng --- vừa giải
+quyết bài toán cụ thể của doanh nghiệp, vừa đóng góp một mẫu hình có thể khái quát hóa.
+
+\section{Mục tiêu, đối tượng và phạm vi}
+
+\subsection{Mục tiêu nghiên cứu}
+
+\begin{enumerate}
+    \item Thu thập sự kiện kết nối TCP ở \textbf{tầng nhân Linux bằng eBPF} (\texttt{kprobe tcp\_v4\_connect}, \texttt{BPF\_MAP\_TYPE\_LPM\_TRIE}, \texttt{BPF\_MAP\_TYPE\_RINGBUF}) trên mọi nút với chi phí thấp.
+    \item Hình thức hóa và giải quyết các bài toán cấu trúc dữ liệu luồng cốt lõi: ước lượng tần suất (Count-Min Sketch), phát hiện thành phần liên thông mạnh (Tarjan), khả-đạt-k-bước (BFS), phân loại địa chỉ IP theo tiền tố (LPM Trie).
+    \item Thiết kế kiến trúc phần mềm phân tầng, cấu hình hóa theo YAML, dùng mẫu thiết kế Strategy~+~Registry cho phép đổi giải thuật không cần sửa mã nguồn.
+    \item Xây dựng hệ thống SOC nội bộ (NATS, PostgreSQL, dịch vụ incident, bộ sinh NetworkPolicy theo cơ chế \textit{generate-for-review}) thực hiện vòng phát hiện$\rightarrow$phản hồi có người duyệt.
+    \item \textbf{Đánh giá định lượng} trên cluster K8s thật: tỉ lệ phát hiện, tỉ lệ báo động giả, chi phí eBPF, độ trễ phát hiện$\rightarrow$phản hồi.
+\end{enumerate}
+
+\subsection{Đối tượng và phạm vi}
+
+\textbf{Đối tượng nghiên cứu:} hành vi quét cổng và dịch chuyển ngang trong mạng nội cụm K8s; các cấu trúc dữ liệu luồng và đồ thị phục vụ phát hiện; cơ chế thực thi chính sách mạng (NetworkPolicy).
+
+\noindent\textbf{Phạm vi:}
+\begin{itemize}
+    \item Kiến trúc Zero-Trust cho môi trường K8s on-premise (không bao gồm cloud-managed như EKS/GKE).
+    \item Phát hiện các mẫu tấn công tiêu biểu: quét cổng (\textit{port scan}), dịch chuyển ngang (\textit{lateral movement}) liên nút.
+    \item Toàn bộ thành phần do sinh viên tự cài đặt, ngoại trừ hạ tầng quan trắc và message bus dùng bản chuẩn thượng nguồn.
+\end{itemize}
+
+\noindent\textbf{Giới hạn:}
+\begin{itemize}
+    \item Phản ứng ở chế độ \emph{generate-for-review}: hệ thống tạo bản nháp NetworkPolicy, người vận hành phê duyệt; không tự động áp đặt.
+    \item Chỉ hỗ trợ IPv4 (\texttt{tcp\_v4\_connect}); đánh giá ở quy mô lớn là hướng phát triển.
+\end{itemize}
+
+Bảng~\ref{tab:scope} tóm tắt ranh giới phạm vi để tránh hiểu nhầm về kỳ vọng đối với hệ
+thống.
+
+\begin{table}[H]
+  \centering
+  \caption{Ranh giới phạm vi của đồ án.}
+  \label{tab:scope}
+  \small
+  \begin{tabularx}{\linewidth}{@{}X X@{}}
+    \toprule
+    \textbf{Trong phạm vi} & \textbf{Ngoài phạm vi} \\
+    \midrule
+    Thu thập kết nối TCP/IPv4 ở tầng nhân & Lưu lượng UDP, ICMP, IPv6 \\
+    Phát hiện quét cổng và dịch chuyển ngang & Phát hiện mã độc, khai thác lỗ hổng tầng ứng dụng \\
+    Cụm Kubernetes on-premise & Dịch vụ K8s do đám mây quản lý (EKS/GKE/AKS) \\
+    Phản hồi cách ly có người duyệt & Tự động cách ly không người duyệt \\
+    Đánh giá trên cụm ba nút & Đánh giá tải ở quy mô hàng nghìn nút \\
+    \bottomrule
+  \end{tabularx}
+\end{table}
+
+\section{Khảo sát giải pháp và công cụ liên quan}
+\label{sec:related-work}
+
+Để định vị đề tài, mục này khảo sát hai nhóm giải pháp: an ninh \emph{truyền thống} và an
+ninh \emph{cloud-native}, rồi đối chiếu các công cụ tiêu biểu đang được công nghiệp dùng.
+Phần so sánh hiệu năng định lượng chi tiết với các công cụ này được đặt ở
+Chương~\ref{ch:eval}; ở đây tập trung vào khác biệt về \emph{cách tiếp cận}.
+
+\subsection{An ninh truyền thống so với an ninh cloud-native}
+
+An ninh truyền thống dựa trên ba trụ: tường lửa/IDS đặt ở biên mạng, tác nhân giám sát
+cài trên từng máy chủ (host-agent, ví dụ Wazuh trong môi trường khảo sát), và hệ SIEM
+phân tích nhật ký theo lô. Mô hình này phù hợp với kiến trúc một khối nhưng bộc lộ giới
+hạn rõ rệt trong môi trường vi dịch vụ: nó không quan sát được lưu lượng Đông--Tây nội cụm,
+không bám theo vòng đời pod ngắn, và phản ứng theo lô nên trễ. Bảng~\ref{tab:trad-vs-cloud}
+đối chiếu hai cách tiếp cận trên các trục then chốt.
+
+\begin{table}[H]
+  \centering
+  \caption{So sánh an ninh truyền thống và an ninh cloud-native (tầng nhân).}
+  \label{tab:trad-vs-cloud}
+  \small
+  \begin{tabularx}{\linewidth}{@{}l X X@{}}
+    \toprule
+    \textbf{Trục} & \textbf{Truyền thống} & \textbf{Cloud-native (đồ án)} \\
+    \midrule
+    Vị trí quan sát   & Biên mạng / máy chủ (Bắc--Nam)        & Tầng nhân mỗi nút (Đông--Tây) \\
+    Cách thu thập     & Host-agent, mirror gói, theo lô       & eBPF không xâm lấn, một \texttt{DaemonSet}/nút \\
+    Độ phủ nội cụm    & Hầu như không thấy pod-tới-pod        & Toàn bộ kết nối pod-tới-pod \\
+    Phụ thuộc ứng dụng& Có (agent theo ngôn ngữ)              & Không (ở tầng nhân) \\
+    Mô hình vận hành  & Cấu hình thủ công, dễ trôi dạt        & Khai báo GitOps, ảnh bất biến, tái lập \\
+    Vòng phản hồi     & Phân tích lô, xử lý thủ công          & Phát hiện trực tuyến, cách ly có người duyệt \\
+    \bottomrule
+  \end{tabularx}
+\end{table}
+
+\subsection{Các công cụ an ninh cloud-native tiêu biểu}
+
+Trong hệ sinh thái cloud-native đã xuất hiện nhiều công cụ khai thác eBPF hoặc BPF-LSM.
+\emph{Falco} \cite{falco2024} phát hiện bất thường theo luật trên dòng lời gọi hệ thống;
+\emph{Tetragon} \cite{tetragon2024} cung cấp quan sát và cưỡng chế ở không gian nhân qua
+LSM; \emph{Cilium} \cite{cilium2024} là một CNI dựa trên eBPF với khả năng quan sát luồng
+(Hubble) và \texttt{NetworkPolicy} L3--L7; \emph{KubeArmor} \cite{kubearmor2024} cưỡng chế
+hành vi tiến trình/tệp/mạng bằng BPF-LSM. Các công cụ NIDS truyền thống như Snort
+\cite{roesch1999snort} và Bro/Zeek \cite{paxson1999bro} phân tích gói ở mức mạng nhưng
+không gắn với ngữ cảnh điều phối của Kubernetes. Bảng~\ref{tab:tool-compare} đối chiếu các
+công cụ này với đồ án.
+
+\begin{table}[H]
+  \centering
+  \caption{Đối chiếu một số công cụ liên quan với đồ án.}
+  \label{tab:tool-compare}
+  \small
+  \begin{tabularx}{\linewidth}{@{}l X c c@{}}
+    \toprule
+    \textbf{Công cụ} & \textbf{Trọng tâm} & \textbf{eBPF} & \textbf{CTDL luồng} \\
+    \midrule
+    Falco          & Phát hiện theo luật trên syscall        & Có   & Không \\
+    Tetragon       & Quan sát + cưỡng chế qua LSM            & Có   & Không \\
+    Cilium/Hubble  & CNI + quan sát luồng + policy L3--L7    & Có   & Không \\
+    KubeArmor      & Cưỡng chế hành vi qua BPF-LSM           & Có   & Không \\
+    Wazuh          & SIEM/host-IDS theo nhật ký             & Không& Không \\
+    Snort, Bro/Zeek& NIDS phân tích gói ở mức mạng          & Không& Không \\
+    \textbf{Đồ án} & \textbf{Phát hiện quét cổng/dịch chuyển ngang} & \textbf{Có} & \textbf{Có (CMS, đồ thị)} \\
+    \bottomrule
+  \end{tabularx}
+\end{table}
+
+Điểm chung của các công cụ trên là khai thác eBPF/LSM để quan sát hoặc cưỡng chế ở tầng
+nhân. Điểm khác biệt --- cũng là khoảng trống đồ án lấp --- là rất ít công cụ đặt
+\emph{cấu trúc dữ liệu luồng} (Count-Min Sketch) và \emph{giải thuật đồ thị} (Tarjan, BFS)
+làm trọng tâm phát hiện quét cổng và dịch chuyển ngang, đồng thời ráp các mảnh thành một
+quy trình phát hiện$\rightarrow$phản hồi khép kín có người duyệt.
+
+\section{Phân tích yêu cầu, đánh giá khả thi và đóng góp}
+\label{sec:requirements}
+
+Từ tập nhu cầu nghiệp vụ ở Mục~\ref{subsec:needs}, mục này chưng cất thành các \emph{yêu
+cầu} cụ thể --- bước chuyển từ ``cần gì'' sang ``hệ thống phải làm gì''. Đây là đầu ra của
+giai đoạn phân tích yêu cầu ở mức tổng quan; việc phân tích chi tiết thành ca sử dụng, sơ
+đồ và thiết kế được tiếp nối ở Chương~\ref{ch:design}. Hình~\ref{fig:re-process} tóm tắt
+mạch truy vết xuyên suốt: từ khảo sát nhu cầu, qua đặc tả yêu cầu, tới thiết kế, cài đặt và
+đánh giá --- trong đó chương này phụ trách phần ``cần gì''.
+
+\begin{figure}[H]
+  \centering
+  \resizebox{0.96\linewidth}{!}{\input{../shared/figures/re-process}}
+  \caption{Quy trình kỹ nghệ yêu cầu và mạch truy vết từ nhu cầu tới các chương sau.}
+  \label{fig:re-process}
+\end{figure}
+
+\subsection{Yêu cầu chức năng}
+
+Bảng~\ref{tab:fr} liệt kê các yêu cầu chức năng (\textit{functional requirement}), mỗi
+yêu cầu truy vết được về nhu cầu đã nêu.
+
+\begin{table}[H]
+  \centering
+  \caption{Yêu cầu chức năng của hệ thống.}
+  \label{tab:fr}
+  \small
+  \begin{tabularx}{\linewidth}{@{}l X l@{}}
+    \toprule
+    \textbf{Mã} & \textbf{Yêu cầu chức năng} & \textbf{Nhu cầu} \\
+    \midrule
+    FR-01 & Thu thập sự kiện kết nối TCP toàn cụm ở tầng nhân (eBPF)        & N1 \\
+    FR-02 & Phân loại địa chỉ theo vùng mạng (pod/dịch vụ/nút/ngoài)        & N2 \\
+    FR-03 & Phát hiện quét cổng theo tần suất kết nối (Count-Min Sketch)    & N2 \\
+    FR-04 & Dựng đồ thị giao tiếp; phát hiện liên thông mạnh và bán kính ảnh hưởng & N3 \\
+    FR-05 & Tạo và làm giàu sự cố (ánh xạ địa chỉ nguồn $\rightarrow$ pod)  & N3, N5 \\
+    FR-06 & Sinh bản nháp \texttt{NetworkPolicy} cách ly (egress-deny)      & N4 \\
+    FR-07 & Quy trình phê duyệt có người duyệt trước khi áp chính sách      & N4 \\
+    FR-08 & Áp chính sách qua API Kubernetes và xác minh hiệu lực           & N4 \\
+    FR-09 & Ghi nhật ký kiểm toán mọi sự cố và hành động                    & N5 \\
+    FR-10 & Bảng điều khiển và console vận hành cho người dùng              & N3, N5 \\
+    \bottomrule
+  \end{tabularx}
+\end{table}
+
+\subsection{Yêu cầu phi chức năng}
+
+Bảng~\ref{tab:nfr} liệt kê các yêu cầu phi chức năng (\textit{non-functional requirement})
+--- những ràng buộc về chất lượng quyết định tính khả dụng của giải pháp ở quy mô doanh
+nghiệp.
+
+\begin{table}[H]
+  \centering
+  \caption{Yêu cầu phi chức năng của hệ thống.}
+  \label{tab:nfr}
+  \small
+  \begin{tabularx}{\linewidth}{@{}l X@{}}
+    \toprule
+    \textbf{Mã} & \textbf{Yêu cầu phi chức năng} \\
+    \midrule
+    NFR-01 & Chi phí thấp: phần thu thập ở tầng nhân chiếm phần nhỏ một lõi CPU mỗi nút \\
+    NFR-02 & Khả mở rộng: hoạt động được trên cụm hàng nghìn pod / nhiều nút \\
+    NFR-03 & Không xâm lấn: không cài tác nhân vào ứng dụng, độc lập ngôn ngữ \\
+    NFR-04 & Tái lập được: triển khai khai báo bằng GitOps với ảnh bất biến \\
+    NFR-05 & Kiểm toán được: mọi hành động phản hồi đều để lại dấu vết \\
+    NFR-06 & Tự chủ nội bộ: chạy trọn vẹn trên hạ tầng on-premise, không phụ thuộc đám mây \\
+    NFR-07 & An toàn khi phản hồi: cách ly chỉ được áp sau khi có người phê duyệt \\
+    \bottomrule
+  \end{tabularx}
+\end{table}
+
+\subsection{Đánh giá tính khả thi}
+\label{sec:feasibility}
+
+Trước khi cam kết thiết kế, cần đánh giá tính khả thi của giải pháp đề xuất trên ba khía
+cạnh. Về \emph{kỹ thuật}: các nút của cụm chạy nhân Linux hiện đại có sẵn thông tin BTF,
+đủ điều kiện để nạp chương trình eBPF CO-RE; CNI Calico đã hiện diện sẵn nên cơ chế cưỡng
+chế \texttt{NetworkPolicy} cho vòng phản hồi là sẵn dùng mà không phải thay đổi hạ tầng
+mạng; chi phí quan sát ở tầng nhân được đo là rất nhỏ (Chương~\ref{ch:eval}), phù hợp với
+ràng buộc NFR-01. Về \emph{kinh tế}: toàn bộ thành phần là mã nguồn mở, không phát sinh
+chi phí giấy phép theo pod --- một lợi thế quyết định khi quy mô vượt một nghìn deployment,
+nơi mô hình tác nhân-theo-pod trở nên đắt đỏ. Về \emph{vận hành}: mô hình \texttt{DaemonSet}
+cho phép triển khai một lần trên mỗi nút và tự lan theo cụm; vòng phản hồi có người duyệt
+tránh rủi ro tự động cách ly nhầm ở quy mô lớn, đáp ứng đúng lo ngại của đội SRE đã ghi
+nhận khi khảo sát. Cả ba khía cạnh đều cho thấy giải pháp khả thi trong đúng bối cảnh
+doanh nghiệp đã khảo sát.
+
+Tính khả thi đi kèm một số giả định và rủi ro cần được nhận diện sớm
+(Bảng~\ref{tab:risk}); việc nêu rõ chúng giúp khoanh vùng đúng những điều kiện mà kết luận
+của đồ án còn đúng và định hướng cho phần giới hạn cùng hướng phát triển ở
+Chương~\ref{ch:eval}.
+
+\begin{table}[H]
+  \centering
+  \caption{Giả định, rủi ro và biện pháp giảm thiểu.}
+  \label{tab:risk}
+  \small
+  \begin{tabularx}{\linewidth}{@{}l X X@{}}
+    \toprule
+    \textbf{Mã} & \textbf{Giả định / rủi ro} & \textbf{Biện pháp giảm thiểu} \\
+    \midrule
+    R1 & Nhân nút có BTF cho CO-RE        & Kiểm tra điều kiện nhân; sinh \texttt{vmlinux.h} lúc xây ảnh \\
+    R2 & Quét gửi SYN thô né \texttt{connect()} & Ghi nhận giới hạn; bổ sung điểm móc khác là hướng phát triển \\
+    R3 & Client hợp lệ tạo nhiều kết nối $\rightarrow$ báo giả & Đếm theo cửa sổ + người duyệt trước khi cách ly \\
+    R4 & Cách ly nhầm gây gián đoạn dịch vụ & Cơ chế \emph{generate-for-review}, có người phê duyệt \\
+    R5 & Đồ thị giao tiếp lớn dần theo thời gian & Chạy Tarjan/BFS theo chu kỳ, độ phức tạp tuyến tính \\
+    \bottomrule
+  \end{tabularx}
+\end{table}
+
+\subsection{Đóng góp của đồ án}
+\label{sec:contributions}
+
+Trên cơ sở phân tích nhu cầu và yêu cầu ở trên, đồ án đặt mục tiêu mang lại bốn đóng góp
+chính. \emph{Thứ nhất}, một kiến trúc tham chiếu đầu cuối cho giám sát Zero-Trust nội cụm,
+kết nối liền mạch từ tầng nhân (eBPF) qua tầng cấu trúc dữ liệu (Count-Min Sketch, đồ thị)
+tới tầng dịch vụ và giao diện vận hành --- lấp đúng khoảng trống ``thiếu kiến trúc ráp
+hoàn chỉnh'' đã chỉ ra. \emph{Thứ hai}, việc đặt cấu trúc dữ liệu luồng và giải thuật đồ
+thị làm trọng tâm phát hiện, kèm phân tích lý thuyết và ví dụ chạy tay (Chương~\ref{ch:foundations}).
+\emph{Thứ ba}, một vòng phản hồi cách ly có người duyệt tận dụng \texttt{NetworkPolicy}
+của Calico --- biến phát hiện thành hành động ngăn chặn cụ thể mà không cần thay đổi hạ
+tầng mạng sẵn có. \emph{Thứ tư}, một bộ số liệu đánh giá định lượng trên cụm Kubernetes
+thật (tỉ lệ phát hiện, báo động giả, chi phí eBPF, độ trễ phát hiện$\rightarrow$phản hồi),
+giúp kiểm chứng tính thực tiễn của cách tiếp cận.
+
+\section{Phương pháp nghiên cứu}
+
+Đồ án kết hợp nghiên cứu lý thuyết với phương pháp xây dựng -- đánh giá
+(\textit{design science}): không dừng ở phân tích mà hiện thực một hệ thống thật rồi đo đạc
+để kiểm chứng giả thuyết. Bốn nhóm hoạt động được tổ chức theo đúng mạch các chương sau.
+
+\textbf{Nghiên cứu lý thuyết.} Phân tích các bài báo gốc của từng giải thuật cốt lõi cùng
+các đảm bảo toán học của chúng (giới hạn sai số của Count-Min Sketch, tính đúng và độ phức
+tạp của Tarjan, BFS, LPM-Trie), làm cơ sở cho lựa chọn thiết kế ở Chương~\ref{ch:foundations}.
+
+\textbf{Phân tích và thiết kế hệ thống.} Từ tập yêu cầu của chương này, dựng các tạo phẩm
+phân tích -- thiết kế theo chuẩn kỹ nghệ phần mềm: sơ đồ use-case và đặc tả, sơ đồ phân rã
+chức năng, sơ đồ luồng dữ liệu, sơ đồ tuần tự, ERD và thiết kế giao diện
+(Chương~\ref{ch:design}).
+
+\textbf{Cài đặt và kiểm thử.} Hiện thực hệ thống với ngôn ngữ phù hợp từng tầng: C cho
+chương trình eBPF, C++17 cho thư viện cấu trúc dữ liệu và pipeline, Go cho các dịch vụ SOC;
+kiểm thử đơn vị cho các thành phần then chốt (Chương~\ref{ch:impl}).
+
+\textbf{Triển khai và đánh giá.} Triển khai trên một cụm Kubernetes thật theo mô hình
+GitOps, chạy các kịch bản tấn công tự động và đo các chỉ số định lượng --- tỉ lệ phát hiện,
+tỉ lệ báo động giả, chi phí eBPF và độ trễ phát hiện$\rightarrow$phản hồi
+(Chương~\ref{ch:eval}).
+
+\section{Kết luận chương}
+
+Chương này đã thực hiện trọn vẹn giai đoạn chuẩn bị của một quy trình kỹ nghệ phần mềm
+trước khi thiết kế: đi từ bối cảnh, khảo sát nhu cầu thực tế, tới phân tích yêu cầu và
+đánh giá khả thi. Từ bối cảnh dịch chuyển kiến trúc một khối sang vi dịch vụ trên
+Kubernetes, chương chỉ ra một bề mặt tấn công Đông--Tây mới mà an ninh chu vi truyền thống
+gần như không quan sát được. Khảo sát tại một doanh nghiệp vận hành Kubernetes nội bộ quy
+mô lớn đã lượng hóa khoảng trống này thành các điểm đau cụ thể --- mà trung tâm là sự
+\emph{mù lưu lượng Đông--Tây} của lớp giám sát hướng host hiện tại --- rồi chưng cất thành
+tập nhu cầu và, qua phân tích, thành các yêu cầu chức năng và phi chức năng có thể truy
+vết. Mô hình mối đe dọa theo chuỗi kill-chain làm rõ vì sao việc phát hiện sớm ở giai đoạn
+trinh sát và dịch chuyển ngang là điểm can thiệp hiệu quả nhất.
+
+Đối chiếu với ba bài tổng quan có hệ thống, hai báo cáo công nghiệp và các công cụ
+cloud-native hiện có, chương xác định một khoảng trống cụ thể: thiếu một kiến trúc tham
+chiếu hoàn chỉnh ráp nối từ tầng nhân tới tầng dịch vụ và giao diện vận hành, lấy cấu trúc
+dữ liệu luồng và giải thuật đồ thị làm trọng tâm phát hiện. Trên cơ sở đó, chương đã phát
+biểu bốn đóng góp chính, mục tiêu, đối tượng và phạm vi của đề tài. Toàn bộ các yêu cầu và
+căn cứ này là đầu vào trực tiếp cho việc phân tích, cụ thể hóa thành thiết kế ở
+Chương~\ref{ch:design}, sau khi đã trang bị cơ sở lý thuyết và công nghệ lõi ở
+Chương~\ref{ch:foundations}.

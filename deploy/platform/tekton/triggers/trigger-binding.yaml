@@ -1,0 +1,18 @@
+# =============================================================================
+# TriggerBinding — extract params from GitHub push webhook payload
+# =============================================================================
+apiVersion: triggers.tekton.dev/v1beta1
+kind: TriggerBinding
+metadata:
+  name: github-push-binding
+  namespace: tekton-pipelines
+  labels:
+    app.kubernetes.io/part-of: slsa-pipeline
+spec:
+  params:
+    - name: git-repo-url
+      value: $(body.repository.ssh_url)
+    - name: git-revision
+      value: $(body.after)
+    - name: git-repo-name
+      value: $(body.repository.name)

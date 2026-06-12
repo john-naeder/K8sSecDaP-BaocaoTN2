@@ -1,0 +1,40 @@
+% Hien trang giam sat tai doanh nghiep: Wazuh o tang host, mu luu luong pod<->pod. Chuong 1.
+\begin{tikzpicture}[font=\footnotesize, >={Stealth[length=2.2mm]},
+    fw/.style  ={draw, fill=red!12, align=center, minimum width=1.7cm, minimum height=1.4cm},
+    pod/.style ={draw, rounded corners=2pt, fill=orange!16, align=center,
+                 minimum width=1.4cm, minimum height=0.66cm},
+    waz/.style ={draw, rounded corners=2pt, fill=blue!12, align=center,
+                 minimum width=3.6cm, minimum height=0.6cm, font=\scriptsize},
+    zone/.style={draw, dashed, rounded corners=3pt},
+    ew/.style  ={<->, red!75!black, very thick, dashed},
+  ]
+  \node[fw] (fw) {Tường lửa\\biên\\(Bắc--Nam)};
+  \node[align=center, font=\scriptsize, above=0.05cm of fw] {\textit{giám sát}\\\textit{Bắc--Nam}};
+
+  % Node 1
+  \node[pod, right=1.6cm of fw, yshift=1.55cm] (a) {svc A};
+  \node[pod, right=0.55cm of a] (b) {svc B};
+  \node[waz, below=0.28cm of a, xshift=0.7cm] (w1) {Wazuh agent (tầng host)};
+  \node[zone, fit=(a)(b)(w1), inner sep=6pt, label={[font=\scriptsize\bfseries]above:Node 1}] (n1) {};
+  % Node 2
+  \node[pod, below=1.7cm of a] (c) {svc C};
+  \node[pod, right=0.55cm of c] (d) {CSDL};
+  \node[waz, below=0.28cm of c, xshift=0.7cm] (w2) {Wazuh agent (tầng host)};
+  \node[zone, fit=(c)(d)(w2), inner sep=6pt, label={[font=\scriptsize\bfseries]below:Node 2}] (n2) {};
+
+  \node[draw, thick, rounded corners=4pt, fit=(n1)(n2), inner sep=11pt,
+        label={[font=\bfseries]above:Cụm Kubernetes (CNI Calico)}] (cl) {};
+
+  \draw[->] (fw.east) -- (a.west);
+  % Luu luong Dong-Tay KHONG duoc giam sat
+  \draw[ew] (a) -- (b);
+  \draw[ew] (b.south) to[bend left=14] (d.north);
+  \draw[ew] (c) -- (d);
+  \draw[ew] (a.south) to[bend right=10] (c.north);
+
+  \node[draw=red!70!black, fill=red!6, rounded corners, align=left, font=\scriptsize,
+        text width=3.0cm, right=1.1cm of cl] (blind)
+    {\textbf{Vùng mù:} lưu lượng pod$\leftrightarrow$pod (Đông--Tây) \emph{không} được giám sát;
+     Wazuh chỉ thấy tầng host.};
+  \draw[->, red!70!black] (blind.west) -- (cl.east);
+\end{tikzpicture}

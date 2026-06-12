@@ -1,0 +1,646 @@
+% $ biblatex auxiliary file $
+% $ biblatex bbl format version 3.3 $
+% Do not modify the above lines!
+%
+% This is an auxiliary file used by the 'biblatex' package.
+% This file may safely be deleted. It will be recreated by
+% biber as required.
+%
+\begingroup
+\makeatletter
+\@ifundefined{ver@biblatex.sty}
+  {\@latex@error
+     {Missing 'biblatex' package}
+     {The bibliography requires the 'biblatex' package.}
+      \aftergroup\endinput}
+  {}
+\endgroup
+
+
+\refsection{0}
+  \datalist[entry]{nty/global//global/global/global}
+    \entry{kubearmor2024}{misc}{}{}
+      \name{author}{1}{}{%
+        {{hash=a494afc68fad935ef8acb690f819bd51}{%
+           family={{Accuknox / CNCF Sandbox}},
+           familyi={A\bibinitperiod}}}%
+      }
+      \strng{namehash}{a494afc68fad935ef8acb690f819bd51}
+      \strng{fullhash}{a494afc68fad935ef8acb690f819bd51}
+      \strng{fullhashraw}{a494afc68fad935ef8acb690f819bd51}
+      \strng{bibnamehash}{a494afc68fad935ef8acb690f819bd51}
+      \strng{authorbibnamehash}{a494afc68fad935ef8acb690f819bd51}
+      \strng{authornamehash}{a494afc68fad935ef8acb690f819bd51}
+      \strng{authorfullhash}{a494afc68fad935ef8acb690f819bd51}
+      \strng{authorfullhashraw}{a494afc68fad935ef8acb690f819bd51}
+      \field{sortinit}{A}
+      \field{sortinithash}{2f401846e2029bad6b3ecc16d50031e2}
+      \field{labelnamesource}{author}
+      \field{labeltitlesource}{title}
+      \field{howpublished}{\url{https://kubearmor.io}}
+      \field{note}{Thực thi chính sách hành vi (process/file/network) ở kernel qua LSM (BPF-LSM/AppArmor/SELinux)}
+      \field{title}{KubeArmor: Runtime Security Enforcement System for Kubernetes}
+      \field{year}{2024}
+    \endentry
+    \entry{appleby2011murmur}{misc}{}{}
+      \name{author}{1}{}{%
+        {{hash=e47db12e5b7bd8afa1b8a472d0cdebc6}{%
+           family={Appleby},
+           familyi={A\bibinitperiod},
+           given={Austin},
+           giveni={A\bibinitperiod}}}%
+      }
+      \strng{namehash}{e47db12e5b7bd8afa1b8a472d0cdebc6}
+      \strng{fullhash}{e47db12e5b7bd8afa1b8a472d0cdebc6}
+      \strng{fullhashraw}{e47db12e5b7bd8afa1b8a472d0cdebc6}
+      \strng{bibnamehash}{e47db12e5b7bd8afa1b8a472d0cdebc6}
+      \strng{authorbibnamehash}{e47db12e5b7bd8afa1b8a472d0cdebc6}
+      \strng{authornamehash}{e47db12e5b7bd8afa1b8a472d0cdebc6}
+      \strng{authorfullhash}{e47db12e5b7bd8afa1b8a472d0cdebc6}
+      \strng{authorfullhashraw}{e47db12e5b7bd8afa1b8a472d0cdebc6}
+      \field{sortinit}{A}
+      \field{sortinithash}{2f401846e2029bad6b3ecc16d50031e2}
+      \field{labelnamesource}{author}
+      \field{labeltitlesource}{title}
+      \field{howpublished}{\url{https://github.com/aappleby/smhasher}}
+      \field{note}{Non-cryptographic hash function used in Count-Min Sketch implementation}
+      \field{title}{MurmurHash3}
+      \field{year}{2011}
+    \endentry
+    \entry{berardi2022microservice}{article}{}{}
+      \name{author}{6}{}{%
+        {{hash=b07e0c041c6a80a03d214445bfc1a8a4}{%
+           family={Berardi},
+           familyi={B\bibinitperiod},
+           given={Davide},
+           giveni={D\bibinitperiod}}}%
+        {{hash=59ec2277e593c4bc2ec6a6f2db160556}{%
+           family={Giallorenzo},
+           familyi={G\bibinitperiod},
+           given={Saverio},
+           giveni={S\bibinitperiod}}}%
+        {{hash=f8fcdd8adfb3d92a2c6f420f7f24909e}{%
+           family={Mauro},
+           familyi={M\bibinitperiod},
+           given={Jacopo},
+           giveni={J\bibinitperiod}}}%
+        {{hash=06f717fffae6263b917bf5bf6f61ef6d}{%
+           family={Melis},
+           familyi={M\bibinitperiod},
+           given={Andrea},
+           giveni={A\bibinitperiod}}}%
+        {{hash=94aec34b0ab3aab8d0b52c5b042d902c}{%
+           family={Montesi},
+           familyi={M\bibinitperiod},
+           given={Fabrizio},
+           giveni={F\bibinitperiod}}}%
+        {{hash=ab5381e5923eb5c934301ad77367fe97}{%
+           family={Prandini},
+           familyi={P\bibinitperiod},
+           given={Marco},
+           giveni={M\bibinitperiod}}}%
+      }
+      \strng{namehash}{c02b0fb54d69842ffc34f10c13d8136c}
+      \strng{fullhash}{24f7ce9f5c18562c7a3a3f92f4267171}
+      \strng{fullhashraw}{24f7ce9f5c18562c7a3a3f92f4267171}
+      \strng{bibnamehash}{24f7ce9f5c18562c7a3a3f92f4267171}
+      \strng{authorbibnamehash}{24f7ce9f5c18562c7a3a3f92f4267171}
+      \strng{authornamehash}{c02b0fb54d69842ffc34f10c13d8136c}
+      \strng{authorfullhash}{24f7ce9f5c18562c7a3a3f92f4267171}
+      \strng{authorfullhashraw}{24f7ce9f5c18562c7a3a3f92f4267171}
+      \field{sortinit}{B}
+      \field{sortinithash}{d7095fff47cda75ca2589920aae98399}
+      \field{labelnamesource}{author}
+      \field{labeltitlesource}{title}
+      \field{journaltitle}{PeerJ Computer Science}
+      \field{note}{Systematic literature review of 290 publications}
+      \field{title}{Microservice security: a systematic literature review}
+      \field{volume}{8}
+      \field{year}{2022}
+      \field{pages}{e779}
+      \range{pages}{-1}
+      \verb{doi}
+      \verb 10.7717/peerj-cs.779
+      \endverb
+    \endentry
+    \entry{cilium2024}{misc}{}{}
+      \name{author}{1}{}{%
+        {{hash=53108f7713fc085c1dcbe0e22cc89617}{%
+           family={{Cilium Authors / CNCF}},
+           familyi={C\bibinitperiod}}}%
+      }
+      \strng{namehash}{53108f7713fc085c1dcbe0e22cc89617}
+      \strng{fullhash}{53108f7713fc085c1dcbe0e22cc89617}
+      \strng{fullhashraw}{53108f7713fc085c1dcbe0e22cc89617}
+      \strng{bibnamehash}{53108f7713fc085c1dcbe0e22cc89617}
+      \strng{authorbibnamehash}{53108f7713fc085c1dcbe0e22cc89617}
+      \strng{authornamehash}{53108f7713fc085c1dcbe0e22cc89617}
+      \strng{authorfullhash}{53108f7713fc085c1dcbe0e22cc89617}
+      \strng{authorfullhashraw}{53108f7713fc085c1dcbe0e22cc89617}
+      \field{sortinit}{C}
+      \field{sortinithash}{4d103a86280481745c9c897c925753c0}
+      \field{labelnamesource}{author}
+      \field{labeltitlesource}{title}
+      \field{howpublished}{\url{https://cilium.io}}
+      \field{note}{CNI dùng eBPF; thực thi NetworkPolicy L3--L7 trực tiếp trong datapath kernel}
+      \field{title}{Cilium: eBPF-based Networking, Observability and Security}
+      \field{year}{2024}
+    \endentry
+    \entry{cormen2009algorithms}{book}{}{}
+      \name{author}{4}{}{%
+        {{hash=835b8c52757d98c15859b416316d9820}{%
+           family={Cormen},
+           familyi={C\bibinitperiod},
+           given={Thomas\bibnamedelima H.},
+           giveni={T\bibinitperiod\bibinitdelim H\bibinitperiod}}}%
+        {{hash=a389dea91a76366c4b4af5f52a928a76}{%
+           family={Leiserson},
+           familyi={L\bibinitperiod},
+           given={Charles\bibnamedelima E.},
+           giveni={C\bibinitperiod\bibinitdelim E\bibinitperiod}}}%
+        {{hash=3a964821f97ee17f8bb285bc61c52899}{%
+           family={Rivest},
+           familyi={R\bibinitperiod},
+           given={Ronald\bibnamedelima L.},
+           giveni={R\bibinitperiod\bibinitdelim L\bibinitperiod}}}%
+        {{hash=bc78426660400760f77758aec45e71a8}{%
+           family={Stein},
+           familyi={S\bibinitperiod},
+           given={Clifford},
+           giveni={C\bibinitperiod}}}%
+      }
+      \list{publisher}{1}{%
+        {MIT Press}%
+      }
+      \strng{namehash}{c251cdfd036d9474565c517e73c19c5d}
+      \strng{fullhash}{10f004e08c7c03d98be0da1231a869ce}
+      \strng{fullhashraw}{10f004e08c7c03d98be0da1231a869ce}
+      \strng{bibnamehash}{10f004e08c7c03d98be0da1231a869ce}
+      \strng{authorbibnamehash}{10f004e08c7c03d98be0da1231a869ce}
+      \strng{authornamehash}{c251cdfd036d9474565c517e73c19c5d}
+      \strng{authorfullhash}{10f004e08c7c03d98be0da1231a869ce}
+      \strng{authorfullhashraw}{10f004e08c7c03d98be0da1231a869ce}
+      \field{sortinit}{C}
+      \field{sortinithash}{4d103a86280481745c9c897c925753c0}
+      \field{labelnamesource}{author}
+      \field{labeltitlesource}{title}
+      \field{edition}{3rd}
+      \field{isbn}{978-0-262-03384-8}
+      \field{title}{Introduction to Algorithms}
+      \field{year}{2009}
+    \endentry
+    \entry{cormode2005cms}{article}{}{}
+      \name{author}{2}{}{%
+        {{hash=22e4fedec69ce5758dc2b71b477dbf20}{%
+           family={Cormode},
+           familyi={C\bibinitperiod},
+           given={Graham},
+           giveni={G\bibinitperiod}}}%
+        {{hash=02e7a85244af7b816b75511a2a7b7197}{%
+           family={Muthukrishnan},
+           familyi={M\bibinitperiod},
+           given={S.},
+           giveni={S\bibinitperiod}}}%
+      }
+      \strng{namehash}{6f5e454625303fdba9c9d10d6432e090}
+      \strng{fullhash}{6f5e454625303fdba9c9d10d6432e090}
+      \strng{fullhashraw}{6f5e454625303fdba9c9d10d6432e090}
+      \strng{bibnamehash}{6f5e454625303fdba9c9d10d6432e090}
+      \strng{authorbibnamehash}{6f5e454625303fdba9c9d10d6432e090}
+      \strng{authornamehash}{6f5e454625303fdba9c9d10d6432e090}
+      \strng{authorfullhash}{6f5e454625303fdba9c9d10d6432e090}
+      \strng{authorfullhashraw}{6f5e454625303fdba9c9d10d6432e090}
+      \field{sortinit}{C}
+      \field{sortinithash}{4d103a86280481745c9c897c925753c0}
+      \field{labelnamesource}{author}
+      \field{labeltitlesource}{title}
+      \field{journaltitle}{Journal of Algorithms}
+      \field{number}{1}
+      \field{title}{An Improved Data Stream Summary: The Count-Min Sketch and its Applications}
+      \field{volume}{55}
+      \field{year}{2005}
+      \field{pages}{58\bibrangedash 75}
+      \range{pages}{18}
+      \verb{doi}
+      \verb 10.1016/j.jalgor.2003.12.001
+      \endverb
+    \endentry
+    \entry{gamma1995patterns}{book}{}{}
+      \name{author}{4}{}{%
+        {{hash=abd927bf30d6566be0ac66a66e893fdd}{%
+           family={Gamma},
+           familyi={G\bibinitperiod},
+           given={Erich},
+           giveni={E\bibinitperiod}}}%
+        {{hash=233f891813bda0f3920985f97a4a7554}{%
+           family={Helm},
+           familyi={H\bibinitperiod},
+           given={Richard},
+           giveni={R\bibinitperiod}}}%
+        {{hash=fd79e5e249b219ff553fc2d811104d78}{%
+           family={Johnson},
+           familyi={J\bibinitperiod},
+           given={Ralph},
+           giveni={R\bibinitperiod}}}%
+        {{hash=e032589f0b9a38804483ab7cf5ccad7f}{%
+           family={Vlissides},
+           familyi={V\bibinitperiod},
+           given={John},
+           giveni={J\bibinitperiod}}}%
+      }
+      \list{publisher}{1}{%
+        {Addison-Wesley}%
+      }
+      \strng{namehash}{4d2492409a24d4ed208ae6670cb91945}
+      \strng{fullhash}{5cb4a6d7baf30d11bae6682eca698b4f}
+      \strng{fullhashraw}{5cb4a6d7baf30d11bae6682eca698b4f}
+      \strng{bibnamehash}{5cb4a6d7baf30d11bae6682eca698b4f}
+      \strng{authorbibnamehash}{5cb4a6d7baf30d11bae6682eca698b4f}
+      \strng{authornamehash}{4d2492409a24d4ed208ae6670cb91945}
+      \strng{authorfullhash}{5cb4a6d7baf30d11bae6682eca698b4f}
+      \strng{authorfullhashraw}{5cb4a6d7baf30d11bae6682eca698b4f}
+      \field{sortinit}{G}
+      \field{sortinithash}{32d67eca0634bf53703493fb1090a2e8}
+      \field{labelnamesource}{author}
+      \field{labeltitlesource}{title}
+      \field{isbn}{978-0-201-63361-0}
+      \field{note}{Strategy Pattern (Chapter 5.9)}
+      \field{title}{Design Patterns: Elements of Reusable Object-Oriented Software}
+      \field{year}{1995}
+    \endentry
+    \entry{gregg2019bpf}{misc}{}{}
+      \name{author}{1}{}{%
+        {{hash=b45aef384111d7e9dd71b74ba427b5f1}{%
+           family={Gregg},
+           familyi={G\bibinitperiod},
+           given={Brendan},
+           giveni={B\bibinitperiod}}}%
+      }
+      \list{publisher}{1}{%
+        {Addison-Wesley Professional}%
+      }
+      \strng{namehash}{b45aef384111d7e9dd71b74ba427b5f1}
+      \strng{fullhash}{b45aef384111d7e9dd71b74ba427b5f1}
+      \strng{fullhashraw}{b45aef384111d7e9dd71b74ba427b5f1}
+      \strng{bibnamehash}{b45aef384111d7e9dd71b74ba427b5f1}
+      \strng{authorbibnamehash}{b45aef384111d7e9dd71b74ba427b5f1}
+      \strng{authornamehash}{b45aef384111d7e9dd71b74ba427b5f1}
+      \strng{authorfullhash}{b45aef384111d7e9dd71b74ba427b5f1}
+      \strng{authorfullhashraw}{b45aef384111d7e9dd71b74ba427b5f1}
+      \field{sortinit}{G}
+      \field{sortinithash}{32d67eca0634bf53703493fb1090a2e8}
+      \field{labelnamesource}{author}
+      \field{labeltitlesource}{title}
+      \field{isbn}{978-0-13-655482-2}
+      \field{title}{BPF Performance Tools: Linux System and Application Observability}
+      \field{year}{2019}
+    \endentry
+    \entry{hutasuhut2024gap}{article}{}{}
+      \name{author}{3}{}{%
+        {{hash=87af26fc6dac9e7ad533ae3e421b7a13}{%
+           family={Hutasuhut},
+           familyi={H\bibinitperiod},
+           given={Nurman\bibnamedelimb Rasyid\bibnamedelima Panusunan},
+           giveni={N\bibinitperiod\bibinitdelim R\bibinitperiod\bibinitdelim P\bibinitperiod}}}%
+        {{hash=3b4c5aa633aee27300555b8e7b93ef46}{%
+           family={Amri},
+           familyi={A\bibinitperiod},
+           given={Mochamad\bibnamedelima Gani},
+           giveni={M\bibinitperiod\bibinitdelim G\bibinitperiod}}}%
+        {{hash=b5e8006da551c44709182c3dd88f141d}{%
+           family={Aji},
+           familyi={A\bibinitperiod},
+           given={Rizal\bibnamedelima Fathoni},
+           giveni={R\bibinitperiod\bibinitdelim F\bibinitperiod}}}%
+      }
+      \strng{namehash}{a58bba20284fdceec33adbe478c5ef54}
+      \strng{fullhash}{a58bba20284fdceec33adbe478c5ef54}
+      \strng{fullhashraw}{a58bba20284fdceec33adbe478c5ef54}
+      \strng{bibnamehash}{a58bba20284fdceec33adbe478c5ef54}
+      \strng{authorbibnamehash}{a58bba20284fdceec33adbe478c5ef54}
+      \strng{authornamehash}{a58bba20284fdceec33adbe478c5ef54}
+      \strng{authorfullhash}{a58bba20284fdceec33adbe478c5ef54}
+      \strng{authorfullhashraw}{a58bba20284fdceec33adbe478c5ef54}
+      \field{sortinit}{H}
+      \field{sortinithash}{23a3aa7c24e56cfa16945d55545109b5}
+      \field{labelnamesource}{author}
+      \field{labeltitlesource}{title}
+      \field{journaltitle}{International Journal of Advanced Computer Science and Applications (IJACSA)}
+      \field{note}{SLR of 487 papers (87 selected via snowball), focusing on post-2020 vulnerabilities}
+      \field{number}{12}
+      \field{title}{Security Gap in Microservices: A Systematic Literature Review}
+      \field{volume}{15}
+      \field{year}{2024}
+      \verb{doi}
+      \verb 10.14569/IJACSA.2024.0151218
+      \endverb
+    \endentry
+    \entry{tetragon2024}{misc}{}{}
+      \name{author}{1}{}{%
+        {{hash=935f42727ebc666c0dc3797abcc29abe}{%
+           family={{Isovalent / Cilium Authors}},
+           familyi={I\bibinitperiod}}}%
+      }
+      \strng{namehash}{935f42727ebc666c0dc3797abcc29abe}
+      \strng{fullhash}{935f42727ebc666c0dc3797abcc29abe}
+      \strng{fullhashraw}{935f42727ebc666c0dc3797abcc29abe}
+      \strng{bibnamehash}{935f42727ebc666c0dc3797abcc29abe}
+      \strng{authorbibnamehash}{935f42727ebc666c0dc3797abcc29abe}
+      \strng{authornamehash}{935f42727ebc666c0dc3797abcc29abe}
+      \strng{authorfullhash}{935f42727ebc666c0dc3797abcc29abe}
+      \strng{authorfullhashraw}{935f42727ebc666c0dc3797abcc29abe}
+      \field{sortinit}{I}
+      \field{sortinithash}{8d291c51ee89b6cd86bf5379f0b151d8}
+      \field{labelnamesource}{author}
+      \field{labeltitlesource}{title}
+      \field{howpublished}{\url{https://tetragon.io}}
+      \field{note}{Quan sát và thực thi (kill/override) ở kernel-space bằng eBPF, gắn vào tracepoint/LSM hook}
+      \field{title}{Tetragon: eBPF-based Security Observability and Runtime Enforcement}
+      \field{year}{2024}
+    \endentry
+    \entry{paxson1999bro}{article}{}{}
+      \name{author}{1}{}{%
+        {{hash=64469f291d02ccaef81afd5cc785044f}{%
+           family={Paxson},
+           familyi={P\bibinitperiod},
+           given={Vern},
+           giveni={V\bibinitperiod}}}%
+      }
+      \list{publisher}{1}{%
+        {Elsevier}%
+      }
+      \strng{namehash}{64469f291d02ccaef81afd5cc785044f}
+      \strng{fullhash}{64469f291d02ccaef81afd5cc785044f}
+      \strng{fullhashraw}{64469f291d02ccaef81afd5cc785044f}
+      \strng{bibnamehash}{64469f291d02ccaef81afd5cc785044f}
+      \strng{authorbibnamehash}{64469f291d02ccaef81afd5cc785044f}
+      \strng{authornamehash}{64469f291d02ccaef81afd5cc785044f}
+      \strng{authorfullhash}{64469f291d02ccaef81afd5cc785044f}
+      \strng{authorfullhashraw}{64469f291d02ccaef81afd5cc785044f}
+      \field{sortinit}{P}
+      \field{sortinithash}{ff3bcf24f47321b42cb156c2cc8a8422}
+      \field{labelnamesource}{author}
+      \field{labeltitlesource}{title}
+      \field{journaltitle}{Computer Networks}
+      \field{number}{23--24}
+      \field{title}{{Bro}: A System for Detecting Network Intruders in Real-Time}
+      \field{volume}{31}
+      \field{year}{1999}
+      \field{pages}{2435\bibrangedash 2463}
+      \range{pages}{29}
+      \verb{doi}
+      \verb 10.1016/S1389-1286(99)00112-7
+      \endverb
+    \endentry
+    \entry{pereiravale2021security}{article}{}{}
+      \name{author}{5}{}{%
+        {{hash=0e3c1edaabed435a646d1331186bcb01}{%
+           family={Pereira-Vale},
+           familyi={P\bibinithyphendelim V\bibinitperiod},
+           given={Anelis},
+           giveni={A\bibinitperiod}}}%
+        {{hash=64ac4edd20557c2440be8896122cce4c}{%
+           family={Fernández},
+           familyi={F\bibinitperiod},
+           given={Eduardo\bibnamedelima B.},
+           giveni={E\bibinitperiod\bibinitdelim B\bibinitperiod}}}%
+        {{hash=151851ab53fd5f186c41528893b99c28}{%
+           family={Monge},
+           familyi={M\bibinitperiod},
+           given={Raúl},
+           giveni={R\bibinitperiod}}}%
+        {{hash=b6ef9ffe548ee7119681e9ce71888524}{%
+           family={Astudillo},
+           familyi={A\bibinitperiod},
+           given={Hernán},
+           giveni={H\bibinitperiod}}}%
+        {{hash=18fcd56f77e4e338b87f152a93cc1a34}{%
+           family={Márquez},
+           familyi={M\bibinitperiod},
+           given={Gastón},
+           giveni={G\bibinitperiod}}}%
+      }
+      \strng{namehash}{9eeb8067295a18c36205819448a3a6b2}
+      \strng{fullhash}{fef6797b01a95b94611c31d27017e356}
+      \strng{fullhashraw}{fef6797b01a95b94611c31d27017e356}
+      \strng{bibnamehash}{fef6797b01a95b94611c31d27017e356}
+      \strng{authorbibnamehash}{fef6797b01a95b94611c31d27017e356}
+      \strng{authornamehash}{9eeb8067295a18c36205819448a3a6b2}
+      \strng{authorfullhash}{fef6797b01a95b94611c31d27017e356}
+      \strng{authorfullhashraw}{fef6797b01a95b94611c31d27017e356}
+      \field{sortinit}{P}
+      \field{sortinithash}{ff3bcf24f47321b42cb156c2cc8a8422}
+      \field{labelnamesource}{author}
+      \field{labeltitlesource}{title}
+      \field{journaltitle}{Computers \& Security}
+      \field{note}{Multivocal review combining 36 academic + 34 grey-literature sources}
+      \field{title}{Security in microservice-based systems: A Multivocal literature review}
+      \field{volume}{103}
+      \field{year}{2021}
+      \field{pages}{102200}
+      \range{pages}{1}
+      \verb{doi}
+      \verb 10.1016/j.cose.2021.102200
+      \endverb
+    \endentry
+    \entry{redhat2024k8ssec}{report}{}{}
+      \name{author}{1}{}{%
+        {{hash=184a913e122c18374ca03bc02b30c050}{%
+           family={{Red Hat, Inc.}},
+           familyi={R\bibinitperiod}}}%
+      }
+      \list{institution}{1}{%
+        {Red Hat}%
+      }
+      \strng{namehash}{184a913e122c18374ca03bc02b30c050}
+      \strng{fullhash}{184a913e122c18374ca03bc02b30c050}
+      \strng{fullhashraw}{184a913e122c18374ca03bc02b30c050}
+      \strng{bibnamehash}{184a913e122c18374ca03bc02b30c050}
+      \strng{authorbibnamehash}{184a913e122c18374ca03bc02b30c050}
+      \strng{authornamehash}{184a913e122c18374ca03bc02b30c050}
+      \strng{authorfullhash}{184a913e122c18374ca03bc02b30c050}
+      \strng{authorfullhashraw}{184a913e122c18374ca03bc02b30c050}
+      \field{sortinit}{R}
+      \field{sortinithash}{5e1c39a9d46ffb6bebd8f801023a9486}
+      \field{labelnamesource}{author}
+      \field{labeltitlesource}{title}
+      \field{note}{Industry survey of 600 DevOps, engineering, and security professionals}
+      \field{title}{The State of {Kubernetes} Security Report, 2024 Edition}
+      \field{type}{techreport}
+      \field{year}{2024}
+      \verb{urlraw}
+      \verb https://www.redhat.com/en/engage/state-kubernetes-security-report-2024
+      \endverb
+      \verb{url}
+      \verb https://www.redhat.com/en/engage/state-kubernetes-security-report-2024
+      \endverb
+    \endentry
+    \entry{roesch1999snort}{inproceedings}{}{}
+      \name{author}{1}{}{%
+        {{hash=8744d8c979517fabd90c0f71be1cb687}{%
+           family={Roesch},
+           familyi={R\bibinitperiod},
+           given={Martin},
+           giveni={M\bibinitperiod}}}%
+      }
+      \list{location}{1}{%
+        {Seattle, Washington, USA}%
+      }
+      \list{publisher}{1}{%
+        {USENIX Association}%
+      }
+      \strng{namehash}{8744d8c979517fabd90c0f71be1cb687}
+      \strng{fullhash}{8744d8c979517fabd90c0f71be1cb687}
+      \strng{fullhashraw}{8744d8c979517fabd90c0f71be1cb687}
+      \strng{bibnamehash}{8744d8c979517fabd90c0f71be1cb687}
+      \strng{authorbibnamehash}{8744d8c979517fabd90c0f71be1cb687}
+      \strng{authornamehash}{8744d8c979517fabd90c0f71be1cb687}
+      \strng{authorfullhash}{8744d8c979517fabd90c0f71be1cb687}
+      \strng{authorfullhashraw}{8744d8c979517fabd90c0f71be1cb687}
+      \field{sortinit}{R}
+      \field{sortinithash}{5e1c39a9d46ffb6bebd8f801023a9486}
+      \field{labelnamesource}{author}
+      \field{labeltitlesource}{title}
+      \field{booktitle}{Proceedings of the 13th USENIX Conference on System Administration (LISA '99)}
+      \field{title}{Snort -- Lightweight Intrusion Detection for Networks}
+      \field{year}{1999}
+      \field{pages}{229\bibrangedash 238}
+      \range{pages}{10}
+    \endentry
+    \entry{nist800207}{report}{}{}
+      \name{author}{4}{}{%
+        {{hash=3c3d7dbac07ac32c82628b6a0e35decb}{%
+           family={Rose},
+           familyi={R\bibinitperiod},
+           given={Scott},
+           giveni={S\bibinitperiod}}}%
+        {{hash=e787d1fa9ed1abc3c9e5b389996ddaac}{%
+           family={Borchert},
+           familyi={B\bibinitperiod},
+           given={Oliver},
+           giveni={O\bibinitperiod}}}%
+        {{hash=bb759fb738bf98cd99171afc9de1f822}{%
+           family={Mitchell},
+           familyi={M\bibinitperiod},
+           given={Stu},
+           giveni={S\bibinitperiod}}}%
+        {{hash=43153bbb8dcab159d4bc17eed5da08f3}{%
+           family={Connelly},
+           familyi={C\bibinitperiod},
+           given={Sean},
+           giveni={S\bibinitperiod}}}%
+      }
+      \list{institution}{2}{%
+        {National Institute of Standards}%
+        {Technology (NIST)}%
+      }
+      \strng{namehash}{ab8391fddb28dc8d96b77c21d6f45aad}
+      \strng{fullhash}{3a8354cfccf1e096b680b06a4ca33cb9}
+      \strng{fullhashraw}{3a8354cfccf1e096b680b06a4ca33cb9}
+      \strng{bibnamehash}{3a8354cfccf1e096b680b06a4ca33cb9}
+      \strng{authorbibnamehash}{3a8354cfccf1e096b680b06a4ca33cb9}
+      \strng{authornamehash}{ab8391fddb28dc8d96b77c21d6f45aad}
+      \strng{authorfullhash}{3a8354cfccf1e096b680b06a4ca33cb9}
+      \strng{authorfullhashraw}{3a8354cfccf1e096b680b06a4ca33cb9}
+      \field{sortinit}{R}
+      \field{sortinithash}{5e1c39a9d46ffb6bebd8f801023a9486}
+      \field{labelnamesource}{author}
+      \field{labeltitlesource}{title}
+      \field{number}{SP 800-207}
+      \field{title}{Zero Trust Architecture}
+      \field{type}{techreport}
+      \field{year}{2020}
+      \verb{doi}
+      \verb 10.6028/NIST.SP.800-207
+      \endverb
+    \endentry
+    \entry{tarjan1972depth}{article}{}{}
+      \name{author}{1}{}{%
+        {{hash=554d334d2af10fcbf6d59d1194d9191b}{%
+           family={Tarjan},
+           familyi={T\bibinitperiod},
+           given={Robert},
+           giveni={R\bibinitperiod}}}%
+      }
+      \strng{namehash}{554d334d2af10fcbf6d59d1194d9191b}
+      \strng{fullhash}{554d334d2af10fcbf6d59d1194d9191b}
+      \strng{fullhashraw}{554d334d2af10fcbf6d59d1194d9191b}
+      \strng{bibnamehash}{554d334d2af10fcbf6d59d1194d9191b}
+      \strng{authorbibnamehash}{554d334d2af10fcbf6d59d1194d9191b}
+      \strng{authornamehash}{554d334d2af10fcbf6d59d1194d9191b}
+      \strng{authorfullhash}{554d334d2af10fcbf6d59d1194d9191b}
+      \strng{authorfullhashraw}{554d334d2af10fcbf6d59d1194d9191b}
+      \field{sortinit}{T}
+      \field{sortinithash}{9af77f0292593c26bde9a56e688eaee9}
+      \field{labelnamesource}{author}
+      \field{labeltitlesource}{title}
+      \field{journaltitle}{SIAM Journal on Computing}
+      \field{number}{2}
+      \field{title}{Depth-First Search and Linear Graph Algorithms}
+      \field{volume}{1}
+      \field{year}{1972}
+      \field{pages}{146\bibrangedash 160}
+      \range{pages}{15}
+      \verb{doi}
+      \verb 10.1137/0201010
+      \endverb
+    \endentry
+    \entry{falco2024}{misc}{}{}
+      \name{author}{1}{}{%
+        {{hash=4168b6978befdd3cf6617eca554ca6a4}{%
+           family={{The Falco Authors / CNCF}},
+           familyi={T\bibinitperiod}}}%
+      }
+      \strng{namehash}{4168b6978befdd3cf6617eca554ca6a4}
+      \strng{fullhash}{4168b6978befdd3cf6617eca554ca6a4}
+      \strng{fullhashraw}{4168b6978befdd3cf6617eca554ca6a4}
+      \strng{bibnamehash}{4168b6978befdd3cf6617eca554ca6a4}
+      \strng{authorbibnamehash}{4168b6978befdd3cf6617eca554ca6a4}
+      \strng{authornamehash}{4168b6978befdd3cf6617eca554ca6a4}
+      \strng{authorfullhash}{4168b6978befdd3cf6617eca554ca6a4}
+      \strng{authorfullhashraw}{4168b6978befdd3cf6617eca554ca6a4}
+      \field{sortinit}{T}
+      \field{sortinithash}{9af77f0292593c26bde9a56e688eaee9}
+      \field{labelnamesource}{author}
+      \field{labeltitlesource}{title}
+      \field{howpublished}{\url{https://falco.org}}
+      \field{note}{Dự án tốt nghiệp CNCF; phát hiện bất thường runtime bằng quy tắc trên syscall qua eBPF/kernel module}
+      \field{title}{Falco: Cloud Native Runtime Security}
+      \field{year}{2024}
+    \endentry
+    \entry{wiz2025k8ssec}{report}{}{}
+      \name{author}{1}{}{%
+        {{hash=8fa8465ed03cc093fcb86aab148bd11d}{%
+           family={{Wiz Research}},
+           familyi={W\bibinitperiod}}}%
+      }
+      \list{institution}{1}{%
+        {Wiz}%
+      }
+      \strng{namehash}{8fa8465ed03cc093fcb86aab148bd11d}
+      \strng{fullhash}{8fa8465ed03cc093fcb86aab148bd11d}
+      \strng{fullhashraw}{8fa8465ed03cc093fcb86aab148bd11d}
+      \strng{bibnamehash}{8fa8465ed03cc093fcb86aab148bd11d}
+      \strng{authorbibnamehash}{8fa8465ed03cc093fcb86aab148bd11d}
+      \strng{authornamehash}{8fa8465ed03cc093fcb86aab148bd11d}
+      \strng{authorfullhash}{8fa8465ed03cc093fcb86aab148bd11d}
+      \strng{authorfullhashraw}{8fa8465ed03cc093fcb86aab148bd11d}
+      \field{sortinit}{W}
+      \field{sortinithash}{4315d78024d0cea9b57a0c6f0e35ed0d}
+      \field{labelnamesource}{author}
+      \field{labeltitlesource}{title}
+      \field{note}{Industry telemetry on cloud-native attack patterns observed across managed Kubernetes environments}
+      \field{title}{Kubernetes Security Report 2025}
+      \field{type}{techreport}
+      \field{year}{2025}
+      \verb{urlraw}
+      \verb https://www.wiz.io/reports/kubernetes-security-report-2025
+      \endverb
+      \verb{url}
+      \verb https://www.wiz.io/reports/kubernetes-security-report-2025
+      \endverb
+    \endentry
+  \enddatalist
+\endrefsection
+\endinput
+

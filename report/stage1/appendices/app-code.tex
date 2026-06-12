@@ -1,0 +1,236 @@
+% ============================================================================
+% PHU LUC A: MA NGUON CORE
+% ============================================================================
+
+\chapter{MÃ NGUỒN LÕI: COUNT-MIN SKETCH, MISRA-GRIES, HASHMAP}
+\label{app:code}
+
+Phụ lục này đính kèm mã nguồn các thuật toán cốt lõi trong thư viện \texttt{libdsa}. Các phần triển khai trực tiếp thuật toán được đưa vào; một số kiểm thử đơn vị và đo hiệu năng quan trọng được đính kèm để minh hoạ cách xác nhận tính đúng và đo hiệu năng. Các mã hỗ trợ khác (\texttt{CMakeLists.txt}, logging, tiện ích phụ trợ) được lược bỏ nhằm đơn giản hóa phần trình bày; các phần mã nguồn chi tiết có thể tham khảo trong kho mã nguồn dự án. Các file được nhúng trực tiếp qua \texttt{\textbackslash lstinputlisting}, đảm bảo đồng bộ tuyệt đối với mã nguồn thực tế do đó các phần chú thích bằng //comment được viết bằng tiếng Anh trong mã nguồn sẽ được giữ nguyên, trong khi phần mô tả dưới đây tóm tắt bằng tiếng Việt để người đọc dễ theo dõi.
+
+\section{Tóm tắt cấu trúc mã nguồn}
+
+Bảng dưới đây liệt kê các file quan trọng và vai trò của chúng trong phụ lục.
+
+\begin{table}[H]
+\centering
+\caption{Tóm tắt các file mã nguồn trong phụ lục}
+\begin{tabularx}{\textwidth}{@{}p{3.2cm} >{\raggedright\arraybackslash}X >{\raggedright\arraybackslash}X@{}}
+\toprule
+Thành phần & File & Vai trò \\
+\midrule
+Giao diện chung & \path{libdsa/include/dsa/frequency/estimator.h} & Khai báo giao diện \texttt{record()}, \texttt{estimate()}, \texttt{reset()}. \\
+CMS (Count-Min Sketch) & \path{libdsa/include/dsa/frequency/count_min_sketch.h} & Khai báo cấu trúc CMS và tham số $w, d$. \\
+ & \path{libdsa/src/frequency/count_min_sketch.cpp} & Hiện thực cập nhật, truy vấn và hàm băm. \\
+Misra--Gries & \path{libdsa/include/dsa/frequency/heavy_hitters.h} & Khai báo thuật toán Misra--Gries. \\
+ & \path{libdsa/src/frequency/heavy_hitters.cpp} & Hiện thực ba nhánh cập nhật bộ đếm. \\
+HashMap Exact & \path{libdsa/include/dsa/frequency/hash_map_exact.h} & Khai báo đếm chính xác theo bảng băm. \\
+ & \path{libdsa/src/frequency/hash_map_exact.cpp} & Hiện thực đếm chính xác bằng \texttt{unordered\_map}. \\
+Kiểm thử & \path{libdsa/tests/test_*.cpp} & Xác nhận đúng: ước lượng trên/dưới, biên sai số. \\
+Benchmark & \path{libdsa/benchmarks/bench_frequency.cpp} & Đo thông lượng và sai số trung bình. \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\section{Giao diện Estimator}
+
+Giao diện chung cho ba thuật toán ước lượng tần suất. Con trỏ \texttt{void*} cho phép khóa là bất cứ kiểu nào có thể tuần tự hoá trong bộ nhớ.
+
+\lstinputlisting[
+  language=C++,
+  caption={\texttt{libdsa/include/dsa/frequency/estimator.h}},
+  label=lst:code-estimator,
+]{../../libdsa/include/dsa/frequency/estimator.h}
+
+\paragraph{Gợi ý đọc mã.}
+\begin{itemize}
+    \item \texttt{record(...)} cập nhật tần suất khi quan sát một khóa mới.
+    \item \texttt{estimate(...)} trả về ước lượng tần suất hiện tại.
+    \item \texttt{reset()} xóa toàn bộ trạng thái; \texttt{memory\_usage()} báo kích thước bộ nhớ.
+    \item Các hàm tiện ích \texttt{record\_u32}, \texttt{estimate\_u32}, \texttt{record\_pair} phục vụ khóa IP hoặc cặp (src, dst).
+\end{itemize}
+
+\section{Count-Min Sketch}
+
+\subsection{Header}
+
+\lstinputlisting[
+  language=C++,
+  caption={\texttt{libdsa/include/dsa/frequency/count\_min\_sketch.h}},
+  label=lst:code-cms-h,
+]{../../libdsa/include/dsa/frequency/count_min_sketch.h}
+
+\subsection{Cài đặt}
+
+Lõi thuật toán: khởi tạo seed theo hệ số vàng, MurmurHash3 đầy đủ (trộn khối \emph{block mixing}, xử lý đuôi \emph{tail handling}, hoàn tất \emph{finalization}), cập nhật (UPDATE) $O(d)$ và truy vấn (QUERY) lấy min $O(d)$.
+
+\lstinputlisting[
+  language=C++,
+  caption={\texttt{libdsa/src/frequency/count\_min\_sketch.cpp}},
+  label=lst:code-cms-cpp,
+]{../../libdsa/src/frequency/count_min_sketch.cpp}
+
+\paragraph{Gợi ý đọc mã.}
+\begin{itemize}
+    \item \texttt{hash(...)} tạo ra chỉ số cột từ khóa và seed để mô phỏng $d$ hàm băm độc lập.
+    \item \texttt{table\_} là ma trận $d \times w$ lưu bộ đếm; \texttt{seeds\_} lưu các seed.
+    \item \texttt{record()} tăng $d$ bộ đếm; \texttt{estimate()} lấy giá trị nhỏ nhất trong $d$ hàng.
+\end{itemize}
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}[
+  node distance=12mm,
+  box/.style={draw, rounded corners, align=center, minimum width=28mm, minimum height=8mm},
+  arrow/.style={-Latex}
+]
+\node[box] (input) {Khóa $x$};
+\node[box, right=12mm of input] (hash) {$d$ hàm băm\\$h_1..h_d$};
+\node[box, right=12mm of hash] (update) {Cập nhật\\$M[i][h_i(x)]{+}{=}1$};
+\node[box, below=12mm of update] (query) {Truy vấn\\$\hat f(x)=\min_i M[i][h_i(x)]$};
+\draw[arrow] (input) -- (hash);
+\draw[arrow] (hash) -- (update);
+\draw[arrow] (hash) |- (query);
+\end{tikzpicture}
+\caption{Luồng xử lý cập nhật và truy vấn trong Count-Min Sketch}
+\end{figure}
+
+\paragraph{Diễn giải.} Sơ đồ cho thấy cùng một khóa đi qua $d$ hàm băm, cập nhật $d$ ô trong ma trận, và truy vấn lấy giá trị nhỏ nhất để tạo ước lượng an toàn (không nhỏ hơn tần suất thật).
+
+\section{Misra-Gries (Heavy Hitters)}
+
+\subsection{Header}
+
+\lstinputlisting[
+  language=C++,
+  caption={\texttt{libdsa/include/dsa/frequency/heavy\_hitters.h}},
+  label=lst:code-mg-h,
+]{../../libdsa/include/dsa/frequency/heavy_hitters.h}
+
+\subsection{Cài đặt}
+
+Ba nhánh logic của UPDATE (có trong bảng / bảng chưa đầy / bảng đầy) tương ứng trực tiếp với Giải thuật~\ref{alg:misra-gries}. Phương thức \texttt{snapshot()} phục vụ chương trình vết chạy (trace) in ra trạng thái bảng sau mỗi bước.
+
+\lstinputlisting[
+  language=C++,
+  caption={\texttt{libdsa/src/frequency/heavy\_hitters.cpp}},
+  label=lst:code-mg-cpp,
+]{../../libdsa/src/frequency/heavy_hitters.cpp}
+
+\paragraph{Gợi ý đọc mã.}
+\begin{itemize}
+    \item \texttt{counters\_} là bảng đếm tối đa $k-1$ phần tử.
+    \item \texttt{record()} rẽ ba nhánh: tăng, thêm mới, hoặc giảm toàn bộ khi bảng đầy.
+    \item \texttt{snapshot()} trả về bản sao bảng đếm để ghi trace.
+\end{itemize}
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}[
+  node distance=10mm,
+  box/.style={draw, rounded corners, align=center, minimum width=26mm, minimum height=8mm},
+  decision/.style={diamond, draw, aspect=2, align=center},
+  arrow/.style={-Latex}
+]
+\node[box] (input) {Khóa $x$};
+\node[decision, below=8mm of input] (in) {$x$\\trong bảng?};
+\node[box, left=18mm of in] (inc) {Tăng\\bộ đếm};
+\node[decision, below=10mm of in] (full) {Bảng\\còn chỗ?};
+\node[box, right=18mm of full] (add) {Thêm\\bộ đếm mới};
+\node[box, below=10mm of full] (dec) {Giảm toàn bộ\\và xóa 0};
+\node[box, below=10mm of dec] (done) {Kết thúc};
+
+\draw[arrow] (input) -- (in);
+\draw[arrow] (in) -- node[left]{Có} (inc);
+\draw[arrow] (in) -- node[right]{Không} (full);
+\draw[arrow] (full) -- node[right]{Có} (add);
+\draw[arrow] (full) -- node[left]{Không} (dec);
+\draw[arrow] (inc) |- (done);
+\draw[arrow] (add) |- (done);
+\draw[arrow] (dec) -- (done);
+\end{tikzpicture}
+\caption{Lưu đồ cập nhật của Misra--Gries}
+\end{figure}
+
+\paragraph{Diễn giải.} Lưu đồ mô tả cơ chế giới hạn bộ nhớ: khi bảng đầy, thuật toán giảm toàn bộ để loại dần các phần tử tần suất thấp.
+
+\section{Kiểm thử đơn vị Misra--Gries}
+
+Bộ kiểm thử kiểm tra các tính chất: không ước lượng vượt, phần tử nặng luôn tồn tại khi $f(x) > m/k$, và sai số bị chặn bởi $m/k$.
+
+\lstinputlisting[
+  language=C++,
+  caption={\texttt{libdsa/tests/test\_heavy\_hitters.cpp}},
+  label=lst:code-test-mg,
+]{../../libdsa/tests/test_heavy_hitters.cpp}
+
+\section{Hash Map Exact (đối chứng)}
+
+\subsection{Header}
+
+\lstinputlisting[
+  language=C++,
+  caption={\texttt{libdsa/include/dsa/frequency/hash\_map\_exact.h}},
+  label=lst:code-hm-h,
+]{../../libdsa/include/dsa/frequency/hash_map_exact.h}
+
+\subsection{Cài đặt}
+
+Cài đặt đối chứng để so sánh: \texttt{std::unordered\_map} với khóa chuỗi byte. Bộ nhớ được ước lượng bao gồm cả chi phí phụ (overhead) của bucket.
+
+\lstinputlisting[
+  language=C++,
+  caption={\texttt{libdsa/src/frequency/hash\_map\_exact.cpp}},
+  label=lst:code-hm-cpp,
+]{../../libdsa/src/frequency/hash_map_exact.cpp}
+
+\paragraph{Gợi ý đọc mã.}
+\begin{itemize}
+    \item \texttt{counts\_} lưu tần suất chính xác theo khóa byte.
+    \item \texttt{record()} tăng trực tiếp bộ đếm; \texttt{estimate()} đọc đúng giá trị hiện có.
+\end{itemize}
+
+\section{Kiểm thử đơn vị HashMap Exact}
+
+Kiểm tra các hành vi cơ bản: đếm đúng, khóa chưa có trả về 0, và \texttt{reset()} làm sạch trạng thái.
+
+\lstinputlisting[
+  language=C++,
+  caption={\texttt{libdsa/tests/test\_hash\_map\_exact.cpp}},
+  label=lst:code-test-hm,
+]{../../libdsa/tests/test_hash_map_exact.cpp}
+
+\section{Kiểm thử đơn vị Count-Min Sketch}
+
+Bộ kiểm thử xác nhận ba tính chất cốt lõi từ Định lý~\ref{thm:cms}: ước lượng thừa trên mọi khóa đã chèn (\texttt{OverestimateProperty}), ước lượng không vượt quá biên $\varepsilon \cdot m$ với xác suất cao (\texttt{AccuracyBound}), và sai số cho khóa chưa chèn bị chặn bởi đụng độ băm (\texttt{NeverInsertedKeyCanOvercount}).
+
+\lstinputlisting[
+  language=C++,
+  caption={\texttt{libdsa/tests/test\_count\_min\_sketch.cpp}},
+  label=lst:code-test-cms,
+]{../../libdsa/tests/test_count_min_sketch.cpp}
+
+\section{Bảng đối chiếu hành vi chính}
+
+\begin{table}[H]
+\centering
+\caption{Hành vi chính của ba cấu trúc tần suất}
+\begin{tabularx}{\textwidth}{@{}p{3.2cm} >{\raggedright\arraybackslash}X >{\raggedright\arraybackslash}X@{}}
+\toprule
+Cấu trúc & \texttt{record(...)} & \texttt{estimate(...)} \\
+\midrule
+CMS & Băm khóa qua $d$ hàm, tăng $d$ ô tương ứng. & Trả về min; không nhỏ hơn tần suất thật. \\
+Misra--Gries & Tăng / thêm mới / giảm toàn bộ tuỳ trạng thái bảng. & Trả về ước lượng không vượt quá tần suất thật. \\
+HashMap Exact & Tăng bộ đếm chính xác trong bảng băm. & Trả về tần suất chính xác của khóa. \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\section{Benchmark tần suất}
+
+Chương trình đo hiệu năng (benchmark) cho thông lượng và độ chính xác. Dữ liệu được sinh từ \texttt{std::mt19937} với seed cố định 42 để đảm bảo tái lập.
+
+\lstinputlisting[
+  language=C++,
+  caption={\texttt{libdsa/benchmarks/bench\_frequency.cpp}},
+  label=lst:code-bench,
+]{../../libdsa/benchmarks/bench_frequency.cpp}

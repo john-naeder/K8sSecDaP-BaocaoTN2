@@ -1,0 +1,31 @@
+% Cau truc Count-Min Sketch: ma tran d x w + bank ham bam, truy van = min. Chuong 2.
+% Thiet ke tranh giao cat: x -> cot hash box -> o duoc to dam (mui ten ngang, khong cat nhan).
+\begin{tikzpicture}[font=\footnotesize, >={Stealth[length=1.7mm]}, x=0.66cm, y=0.66cm,
+    cell/.style={draw, minimum size=0.62cm, inner sep=0},
+    hb/.style={draw, rounded corners=1pt, fill=green!12, minimum width=0.9cm,
+               minimum height=0.5cm, font=\scriptsize, inner sep=1pt},
+  ]
+  % Luoi d=5 hang x w=8 cot (cot ve tu x=2..9 de chua bank ham bam ben trai)
+  \foreach \r in {1,...,5}{
+    \foreach \c in {1,...,8}{ \node[cell] at (\c+1,-\r) {}; }
+  }
+  % O ma khoa x roi vao (1 o moi hang)
+  \foreach \r/\c in {1/3,2/6,3/2,4/7,5/4}{ \node[cell, fill=blue!22] at (\c+1,-\r) {}; }
+  % Bank ham bam: cot cac hop h1..h5 thang hang voi tung hang luoi
+  \foreach \r in {1,...,5}{ \node[hb] (h\r) at (-0.1,-\r) {$h_{\r}$}; }
+  % Khoa x
+  \node[draw, rounded corners=2pt, fill=orange!22, font=\small] (x) at (-2.7,-3) {khóa $x$};
+  % x -> cac hop ham bam (fan tren vung trong, khong cat nhan)
+  \foreach \r in {1,...,5}{ \draw[->, gray!75] (x.east) -- (h\r.west); }
+  % moi hop ham bam -> o to dam tuong ung (mui ten NGANG, sach)
+  \foreach \r/\c in {1/3,2/6,3/2,4/7,5/4}{ \draw[->, blue!65] (h\r.east) -- ({\c+1-0.32},-\r); }
+  % nhan w (tren) va d (trai)
+  \draw[decorate, decoration={brace, amplitude=4pt}] (1.68,-0.45) -- (9.32,-0.45)
+    node[midway, above=3pt] {$w$ cột (chiều rộng)};
+  \node[rotate=90, font=\scriptsize, anchor=south] at (-3.9,-3) {$d$ hàng băm};
+  % truy van min (ben phai, cach luoi)
+  \node[draw, rounded corners=2pt, fill=gray!8, align=left, anchor=west] at (10.3,-3)
+    {$\hat f(x)=\displaystyle\min_{1\le i\le d} C[i][\,h_i(x)\,]$\\[2pt]
+     lấy giá trị \emph{nhỏ nhất} trong các ô tô đậm\\
+     $\Rightarrow$ không bao giờ ước lượng thiếu};
+\end{tikzpicture}

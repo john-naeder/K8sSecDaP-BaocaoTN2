@@ -1,0 +1,407 @@
+% ============================================================================
+% CHUONG: PHAN TICH VA SO SANH GIAI THUAT
+% ============================================================================
+
+\chapter{PHÂN TÍCH VÀ SO SÁNH CÁC GIẢI THUẬT}
+\label{ch:compare}
+
+\section{Kết luận trước, phân tích sau}
+\label{sec:cms-upfront}
+
+Để người đọc nắm được đích đến trước khi đi theo lập luận, chương này mở đầu bằng \textbf{kết luận} rồi mới dẫn dắt chứng minh:
+
+\begin{quote}
+\textit{Báo cáo chọn \textbf{Count-Min Sketch} (CMS) với biến thể \textbf{Conservative Update} làm phương án chính để giải bài toán Point Query trên luồng sự kiện mạng. Tham số thực dụng: $w = 2048$, $d = 5$, ngốn $80$ KB bộ nhớ mỗi sketch.}
+\end{quote}
+
+Quyết định này đứng vững trên bốn yêu cầu cốt lõi của hệ thống giám sát theo tinh thần Zero Trust (đã phát biểu ở Chương~\ref{ch:problem}): (i) bộ nhớ không phụ thuộc số phần tử phân biệt; (ii) chi phí UPDATE worst-case hằng số để chịu được $10^5$--$10^7$ sự kiện/giây; (iii) ước lượng \textit{trên mức} để không bỏ sót bất thường; (iv) hợp nhất được giữa các node trong cluster Kubernetes.
+
+Phần còn lại của chương \textbf{chứng minh tính duy nhất} của CMS bằng cách loại trừ tuần tự các phương án đối thủ. Mỗi phương án đều thoả \textit{ít nhất} một yêu cầu trong (i)--(iv) nhưng vi phạm ít nhất một yêu cầu khác:
+
+\begin{enumerate}
+  \item \textbf{Hash Map chính xác} (Mục~\ref{sec:hashmap}) --- thoả (ii), (iii), (iv); \textbf{vi phạm (i)} do bộ nhớ tăng tuyến tính theo $F_0$, dễ bị tấn công IP-spoofing làm tràn.
+  \item \textbf{Misra-Gries} (Mục~\ref{sec:mg}) --- thoả (i); \textbf{vi phạm (iii)} vì ước lượng \textit{dưới mức} (có thể bỏ sót heavy hitter) và \textbf{vi phạm (iv)} vì không hợp nhất được tự nhiên.
+  \item \textbf{Count Sketch} (Mục~\ref{sec:countsketch}) --- thoả cả bốn về mặt lý thuyết; bị loại vì \textbf{chi phí bộ nhớ cao hơn CMS một bậc} $1/\varepsilon$, không tương xứng với lợi ích ``không thiên lệch'' trong bài toán phát hiện bất thường.
+\end{enumerate}
+
+Hình~\ref{fig:decision-funnel} tóm tắt dòng loại trừ này. Các mục tiếp theo khai triển chi tiết từng bước với giả-mã, phân tích độ phức tạp và minh họa chạy tay.
+
+\begin{figure}[H]
+  \centering
+  \begin{tikzpicture}[
+    node distance=0.5cm,
+    opt/.style={draw, rectangle, rounded corners=3pt, minimum width=4cm, minimum height=0.9cm, align=center, font=\small},
+    kept/.style={opt, fill=green!20},
+    rej/.style={opt, fill=red!15},
+    arr/.style={-{Stealth[length=3mm]}, thick},
+    reason/.style={font=\scriptsize\itshape, align=left, fill=yellow!10, draw=gray!30, rounded corners=2pt, inner sep=3pt},
+  ]
+    \node[rej]  (hm)  at (0, 0)    {Hash Map chính xác};
+    \node[rej]  (mg)  at (0, -1.4) {Misra-Gries};
+    \node[rej]  (cs)  at (0, -2.8) {Count Sketch};
+    \node[kept] (cms) at (0, -4.2) {\textbf{Count-Min Sketch} $\leftarrow$ chọn};
+
+    \draw[arr] (hm)  -- (mg);
+    \draw[arr] (mg)  -- (cs);
+    \draw[arr] (cs)  -- (cms);
+
+    \node[reason, right=1.2cm of hm]  {Vi phạm (i): bộ nhớ $\propto F_0$, dễ bị hash-flooding};
+    \node[reason, right=1.2cm of mg]  {Vi phạm (iii): ước lượng dưới mức, bỏ sót; \\ khó merge (vi phạm iv)};
+    \node[reason, right=1.2cm of cs]  {Bộ nhớ $O((1/\varepsilon^2)\log(1/\delta))$ --- lớn hơn CMS $\sim 1000 \times$ tại $\varepsilon{=}10^{-3}$};
+    \node[reason, right=1.2cm of cms] {Thoả (i)--(iv); CU khai thác tính Zipfian};
+  \end{tikzpicture}
+  \caption{Phễu loại trừ phương án ước lượng tần suất.}
+  \label{fig:decision-funnel}
+\end{figure}
+
+\noindent Hình~\ref{fig:decision-funnel} biểu diễn quá trình loại trừ từng phương án: mỗi nút đỏ ghi rõ yêu cầu (i)--(iv) bị vi phạm; nút xanh dưới cùng là Count-Min Sketch --- phương án duy nhất thoả đồng thời cả bốn ràng buộc đặt ra ở Chương~\ref{ch:problem}.
+
+\section{Phương án A: Exact Hash Map}
+\label{sec:hashmap}
+
+\subsection{Giải thuật và độ phức tạp}
+
+Phương án trực tiếp nhất cho Point Query là duy trì một bảng băm $T: U \to \mathbb{N}$ với khóa là phần tử và giá trị là số lần xuất hiện: UPDATE tăng giá trị tương ứng; QUERY tra cứu trực tiếp.
+
+\begin{algorithm}[H]
+\caption{Exact Hash Map --- UPDATE và QUERY}
+\label{alg:hashmap}
+\begin{algorithmic}[1]
+\State $T \gets$ bảng băm rỗng
+\Statex
+\Function{Update}{$a_j$}
+  \If{$a_j \in T$}
+    \State $T[a_j] \gets T[a_j] + 1$
+  \Else
+    \State $T[a_j] \gets 1$
+  \EndIf
+\EndFunction
+\Statex
+\Function{Query}{$x$}
+  \If{$x \in T$}
+    \State \Return $T[x]$
+  \Else
+    \State \Return $0$
+  \EndIf
+\EndFunction
+\end{algorithmic}
+\end{algorithm}
+
+Gọi $F_0$ là số phần tử phân biệt đã xuất hiện; bảng băm lưu đúng $F_0$ cặp khóa--giá trị. Về độ phức tạp: \textbf{bộ nhớ} là $O\bigl(F_0 \cdot (\log n + \log m)\bigr)$, tức $O(F_0)$ entries (mỗi entry cần $\log n$ bit cho khóa và $\log m$ bit cho counter); \textbf{UPDATE} là $O(1)$ amortized với hàm băm tốt; \textbf{QUERY} là $O(1)$; \textbf{sai số} bằng $0$ --- chính xác tuyệt đối.
+
+\subsection{Minh hoạ chạy tay và đánh giá}
+
+Với luồng $S = (a, b, a, c, a, b)$, Bảng~\ref{tab:hashmap-trace} liệt kê trạng thái $T$ sau từng bước:
+
+\begin{table}[H]
+  \centering
+  \caption{Trạng thái Hash Map sau từng bước UPDATE.}
+  \label{tab:hashmap-trace}
+  \begin{tabular}{@{}c l l@{}}
+    \toprule
+    \textbf{Bước} & \textbf{Phần tử} & \textbf{Trạng thái $T$} \\
+    \midrule
+    1 & $a$ & $\{a: 1\}$ \\
+    2 & $b$ & $\{a: 1, b: 1\}$ \\
+    3 & $a$ & $\{a: 2, b: 1\}$ \\
+    4 & $c$ & $\{a: 2, b: 1, c: 1\}$ \\
+    5 & $a$ & $\{a: 3, b: 1, c: 1\}$ \\
+    6 & $b$ & $\{a: 3, b: 2, c: 1\}$ \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+Từ đây rút ra \textbf{ưu điểm} rõ ràng: chính xác tuyệt đối, thao tác đơn giản, dễ cài đặt và kiểm chứng, phù hợp khi $F_0$ nhỏ. Đổi lại, \textbf{nhược điểm} nghiêm trọng: bộ nhớ tăng tuyến tính theo $F_0$; tồn tại kẻ tấn công chủ động tạo ra luồng có $F_0$ tiến tới $\min(n, m)$ để làm tràn bộ nhớ (\textit{hash-flooding attack}); không có khả năng hợp nhất (\textit{merge}) giữa các bảng; khó hỗ trợ cửa sổ trượt (\textit{sliding window}). Trong bối cảnh giám sát theo tinh thần Zero Trust, nơi $n = 2^{32}$ (IPv4) và kẻ tấn công có thể giả mạo địa chỉ IP, phương án này không khả thi.
+
+\paragraph{$\Rightarrow$ Kết quả loại trừ.}
+Hash Map \textbf{vi phạm yêu cầu (i)} về bộ nhớ không đổi: chỉ cần $F_0 = 10^7$ (dễ đạt bằng IP-spoofing) là cần $\sim$469 MB --- không phù hợp cho một node giám sát chạy song song với các dịch vụ khác. Ta cần một phương án \textit{bộ nhớ không đổi bất kể $F_0$}. Đây là động cơ dẫn tới Misra-Gries ở mục tiếp theo.
+
+\section{Phương án B: Misra-Gries (Heavy Hitters)}
+\label{sec:mg}
+
+\subsection{Giải thuật và lưu đồ quyết định}
+
+Thuật toán Misra--Gries \cite{misra1982finding} duy trì nhiều nhất $k$ cặp $(\text{phần tử}, \text{counter})$ trong một bảng $T$. Khi nhận phần tử mới: nếu đã có trong $T$ thì tăng counter; nếu chưa có và $|T| < k$ thì thêm với counter bằng 1; nếu chưa có và bảng đã đầy thì \textit{giảm tất cả} counters, loại bỏ những phần tử có counter về 0.
+
+\begin{algorithm}[H]
+\caption{Misra-Gries --- UPDATE và QUERY}
+\label{alg:misra-gries}
+\begin{algorithmic}[1]
+\Require Tham số $k = \lceil 1/\varepsilon \rceil$
+\State $T \gets$ bảng rỗng \Comment{Tối đa $k$ entries}
+\Statex
+\Function{Update}{$a_j$}
+    \If{$a_j \in T$}
+        \State $T[a_j] \gets T[a_j] + 1$
+    \ElsIf{$|T| < k$}
+        \State $T[a_j] \gets 1$
+    \Else
+        \ForAll{$(e, c) \in T$} \Comment{Giảm tất cả counters}
+            \State $c \gets c - 1$
+            \If{$c = 0$}
+                \State Xóa $e$ khỏi $T$
+            \EndIf
+        \EndFor
+    \EndIf
+\EndFunction
+\Statex
+\Function{Query}{$x$}
+    \If{$x \in T$}
+        \State \Return $T[x]$
+    \Else
+        \State \Return $0$
+    \EndIf
+\EndFunction
+\end{algorithmic}
+\end{algorithm}
+
+Khác với CMS (không có nhánh trong UPDATE), Misra--Gries có ba nhánh rõ rệt. Hình~\ref{fig:mg-flow} trực quan hoá cây quyết định để người đọc theo dõi dễ dàng hơn so với giả-mã.
+
+\begin{figure}[H]
+  \centering
+  \begin{tikzpicture}[
+    startstop/.style={draw, ellipse, minimum width=2.6cm, minimum height=0.9cm, fill=gray!15, font=\small},
+    decision/.style={draw, diamond, aspect=2.3, inner sep=2pt, fill=yellow!25, font=\small, align=center},
+    process/.style={draw, rectangle, rounded corners=2pt, minimum width=4.2cm, minimum height=1cm, align=center, font=\small},
+    branch1/.style={process, fill=green!15},
+    branch2/.style={process, fill=blue!10},
+    branch3/.style={process, fill=red!15},
+    arrlabel/.style={font=\scriptsize, fill=white, inner sep=1pt},
+    flow/.style={-{Stealth[length=2.5mm]}, thick},
+  ]
+    % Layout 3 cot co dinh bang toa do tuyet doi
+    \node[startstop] (start)                     at ( 0,  0)    {UPDATE($a_j$)};
+    \node[decision]  (q1)                        at ( 0, -1.6)  {$a_j \in T\,$?};
+    \node[branch1]   (inc)                       at (-5, -3.4)  {\textbf{Nhánh 1:} \ $T[a_j] \mathrel{+}{=}\, 1$};
+    \node[decision]  (q2)                        at ( 0, -3.4)  {$|T| < k\,$?};
+    \node[branch2]   (ins)                       at ( 0, -5.3)  {\textbf{Nhánh 2:} \ $T[a_j] \gets 1$};
+    \node[branch3]   (dec)                       at ( 5, -5.3)  {\textbf{Nhánh 3:} giảm mọi $T[e]$, \\ xoá khi $T[e]=0$};
+    \node[startstop] (stop)                      at ( 0, -7.2)  {Kết thúc};
+
+    % Start -> q1
+    \draw[flow] (start) -- (q1);
+    % q1 "co" -> inc (trai)
+    \draw[flow] (q1.west)  -- node[arrlabel, above]{có}      (inc.east);
+    % q1 "khong" -> q2 (thang xuong)
+    \draw[flow] (q1.south) -- node[arrlabel, right]{không}   (q2.north);
+    % q2 "con cho" -> ins (thang xuong)
+    \draw[flow] (q2.south) -- node[arrlabel, right]{còn chỗ} (ins.north);
+    % q2 "day" -> dec (sang phai rồi xuống)
+    \draw[flow] (q2.east)  -| node[arrlabel, above, pos=0.25]{đầy} (dec.north);
+    % Gop ve stop
+    \draw[flow] (inc.south) |- (stop.west);
+    \draw[flow] (ins.south) -- (stop.north);
+    \draw[flow] (dec.south) |- (stop.east);
+  \end{tikzpicture}
+  \caption{Lưu đồ quyết định của Misra-Gries.}
+  \label{fig:mg-flow}
+\end{figure}
+
+\noindent Chi tiết: Lưu đồ quyết định của Misra-Gries UPDATE, gồm ba nhánh (khóa có trong bảng / bảng chưa đầy / bảng đã đầy). Nhánh 3 là trường hợp worst-case $O(k)$ vì phải giảm toàn bộ counters.
+
+\subsection{Độ phức tạp, tính đúng đắn và ví dụ}
+
+Về độ phức tạp: \textbf{bộ nhớ} là $O(k) = O(1/\varepsilon)$, độc lập với $m$ và $n$; \textbf{UPDATE} là $O(1)$ trong trường hợp có sẵn/thêm mới và $O(k)$ khi phải giảm toàn bộ, nhưng amortized vẫn là $O(1)$ vì mỗi phép giảm đòi hỏi ít nhất $k$ phần tử mới đã được nạp vào luồng; \textbf{QUERY} là $O(1)$. Về tính đúng đắn, định lý Misra--Gries dưới đây cho cận sai số dạng một phía:
+
+\begin{theorem}[Misra--Gries, 1982]
+\label{thm:mg}
+Với $k = \lceil 1/\varepsilon \rceil$, thuật toán Misra--Gries trả về ước lượng $\hat{f}_x$ thỏa mãn
+\begin{equation}
+f_x - \varepsilon \cdot m \le \hat{f}_x \le f_x.
+\label{eq:misra-gries-guarantee}
+\end{equation}
+\end{theorem}
+
+\begin{proof}[Ý tưởng chứng minh]
+Mỗi lần giảm toàn bộ counters sẽ làm ``mất'' đúng $k + 1$ đơn vị đếm (bao gồm cả phần tử mới). Do bảng chỉ bị giảm khi đã đầy $k$ entries và đang cố thêm phần tử mới, số lần giảm tối đa là $m/(k+1)$. Do đó sai số trên mỗi phần tử không vượt quá số lần giảm, tức là $m/(k+1) \le \varepsilon m$ với $k = \lceil 1/\varepsilon \rceil$. Ước lượng luôn \textit{dưới mức} vì counters chỉ bị giảm chứ không bao giờ tăng sai.
+\end{proof}
+
+Để minh hoạ bằng số, với $k = 2$ và luồng $S = (a, b, c, a, d, a)$:
+
+\begin{table}[H]
+  \centering
+  \caption{Trạng thái bảng Misra-Gries với $k = 2$.}
+  \label{tab:mg-trace}
+  \begin{tabular}{@{}c l l l@{}}
+    \toprule
+    \textbf{Bước} & \textbf{Phần tử} & \textbf{Nhánh} & \textbf{Trạng thái $T$} \\
+    \midrule
+    1 & $a$ & thêm mới & $\{a: 1\}$ \\
+    2 & $b$ & thêm mới & $\{a: 1, b: 1\}$ \\
+    3 & $c$ & giảm toàn bộ & $\{\}$ \\
+    4 & $a$ & thêm mới & $\{a: 1\}$ \\
+    5 & $d$ & thêm mới & $\{a: 1, d: 1\}$ \\
+    6 & $a$ & tăng counter & $\{a: 2, d: 1\}$ \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+Kết quả QUERY: $\hat{f}_a = 2$ (thực tế $f_a = 3$, sai lệch $1 = m/(k+1) = 6/3$); $\hat{f}_b = 0$ (thực tế $1$); $\hat{f}_c = 0$ (thực tế $1$); $\hat{f}_d = 1$ (chính xác). Ví dụ này nêu rõ hai đặc trưng của Misra--Gries:
+
+\textbf{Ưu điểm:} deterministic --- không có yếu tố ngẫu nhiên, sai số là tất định; bộ nhớ $O(1/\varepsilon)$ độc lập với $n$ và $m$; phù hợp bài toán Heavy Hitters (top-$k$). \textbf{Nhược điểm:} ước lượng \textit{dưới mức} --- với bài toán phát hiện bất thường, điều này nguy hiểm (có thể bỏ sót tấn công); không thể kết hợp (\textit{merge}) hai sketch Misra--Gries cho cùng luồng con một cách đơn giản; khó hỗ trợ cửa sổ trượt; UPDATE có chi phí worst-case $O(k)$, không ổn định.
+
+\paragraph{$\Rightarrow$ Kết quả loại trừ.}
+Misra-Gries giải được yêu cầu bộ nhớ $O(1/\varepsilon)$ nhưng \textbf{vi phạm yêu cầu (iii)} vì ước lượng $\hat f_x \le f_x$ (dưới mức): trong bài toán phát hiện DDoS/port-scan, ngưỡng cảnh báo dựa trên ước lượng dưới mức sẽ \textit{bỏ sót} các IP tấn công thực sự. Ta cần ước lượng \textit{trên mức} để giữ được \textit{recall} cao. Đồng thời Misra-Gries không hợp nhất được tự nhiên nên vi phạm cả (iv) --- điểm chí tử với kiến trúc đa node. Đây là động cơ dẫn tới Count-Min Sketch ở mục tiếp theo.
+
+\section{Phương án C: Count-Min Sketch (được chọn)}
+\label{sec:cms}
+
+Cấu trúc, thuật toán và chứng minh đã được trình bày chi tiết ở chương trước (Định lý~\ref{thm:cms}). Phần này tập trung vào các nhận xét so sánh.
+
+\subsection{Minh hoạ chạy tay và đánh giá}
+
+Với $w = 4$, $d = 2$, giả sử $h_1, h_2$ cho kết quả như bảng dưới đối với luồng $S = (a, b, a, c, a, b)$:
+
+\begin{table}[H]
+  \centering
+  \caption{Bảng hash cho ví dụ CMS với $w = 4$, $d = 2$.}
+  \label{tab:cms-hash}
+  \begin{tabular}{@{}c c c@{}}
+    \toprule
+    \textbf{Phần tử} & $h_1(\cdot)$ & $h_2(\cdot)$ \\
+    \midrule
+    $a$ & 2 & 0 \\
+    $b$ & 0 & 3 \\
+    $c$ & 2 & 1 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\begin{table}[H]
+  \centering
+  \caption{Trạng thái ma trận CMS $M$ sau từng bước UPDATE.}
+  \label{tab:cms-trace}
+  \begin{tabular}{@{}c l l@{}}
+    \toprule
+    \textbf{Bước} & \textbf{Phần tử} & \textbf{Ma trận $M$ (hàng 1 / hàng 2)} \\
+    \midrule
+    1 & $a$ & $[0,0,1,0]$ / $[1,0,0,0]$ \\
+    2 & $b$ & $[1,0,1,0]$ / $[1,0,0,1]$ \\
+    3 & $a$ & $[1,0,2,0]$ / $[2,0,0,1]$ \\
+    4 & $c$ & $[1,0,3,0]$ / $[2,1,0,1]$ \\
+    5 & $a$ & $[1,0,4,0]$ / $[3,1,0,1]$ \\
+    6 & $b$ & $[2,0,4,0]$ / $[3,1,0,2]$ \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+Kết quả QUERY: $\hat{f}_a = \min(M[1][2], M[2][0]) = \min(4, 3) = 3$ (đúng); $\hat{f}_b = \min(M[1][0], M[2][3]) = \min(2, 2) = 2$ (đúng); $\hat{f}_c = \min(M[1][2], M[2][1]) = \min(4, 1) = 1$ (đúng). Ghi nhận: hàng $1$ ô $2$ chứa nhiễu do đụng độ $a$--$c$, nhưng thao tác \textit{min} đã loại bỏ nhiễu này nhờ hàng $2$.
+
+Hình~\ref{fig:cms-matrix-evolution} minh họa trực quan trạng thái của ma trận sau bước cuối cùng. Các ô được tô màu theo vai trò: màu xanh lá là ô của khóa truy vấn $a$, màu xanh dương là của $b$, màu cam nhạt là của $c$. Ô $M[1][2]$ bị tô hai màu vì là điểm đụng độ giữa $a$ và $c$.
+
+\begin{figure}[H]
+  \centering
+  \begin{tikzpicture}[
+    cell/.style={draw, minimum width=1.1cm, minimum height=0.9cm, anchor=center, font=\small},
+    hashlabel/.style={font=\small\itshape},
+  ]
+    % Final state after step 6: Row 0 (h1) = [2,0,4,0], Row 1 (h2) = [3,1,0,2]
+    % Row 1
+    \node[cell, fill=blue!25]  (r11) at (0*1.1, 0)    {2};
+    \node[cell]                (r12) at (1*1.1, 0)    {0};
+    \node[cell, fill=green!30!orange!30] (r13) at (2*1.1, 0) {4};
+    \node[cell]                (r14) at (3*1.1, 0)    {0};
+    % Row 2
+    \node[cell, fill=green!30] (r21) at (0*1.1, -0.9) {3};
+    \node[cell, fill=orange!30](r22) at (1*1.1, -0.9) {1};
+    \node[cell]                (r23) at (2*1.1, -0.9) {0};
+    \node[cell, fill=blue!25]  (r24) at (3*1.1, -0.9) {2};
+
+    \node[left=4pt of r11, hashlabel] {hàng 1 ($h_1$)};
+    \node[left=4pt of r21, hashlabel] {hàng 2 ($h_2$)};
+
+    % column index labels
+    \foreach \c/\i in {0/0, 1/1, 2/2, 3/3} {
+      \node[below=2pt of {r2\the\numexpr\i+1\relax}, font=\scriptsize] at (\c*1.1, -1.5) {cột \c};
+    }
+
+    % Legend
+    \begin{scope}[shift={(5.6, 0)}]
+      \node[cell, fill=green!30, minimum width=0.5cm, minimum height=0.5cm] (la) at (0,0) {};
+      \node[right=2pt of la, font=\small] {ô của $a$};
+      \node[cell, fill=blue!25, minimum width=0.5cm, minimum height=0.5cm] (lb) at (0,-0.6) {};
+      \node[right=2pt of lb, font=\small] {ô của $b$};
+      \node[cell, fill=orange!30, minimum width=0.5cm, minimum height=0.5cm] (lc) at (0,-1.2) {};
+      \node[right=2pt of lc, font=\small] {ô của $c$};
+      \node[cell, fill=green!30!orange!30, minimum width=0.5cm, minimum height=0.5cm] (lcol) at (0,-1.8) {};
+      \node[right=2pt of lcol, font=\small] {đụng độ $a \cap c$};
+    \end{scope}
+  \end{tikzpicture}
+  \caption{Trạng thái cuối của ma trận Count-Min Sketch.}
+  \label{fig:cms-matrix-evolution}
+\end{figure}
+
+\noindent Chi tiết: Trạng thái ma trận Count-Min Sketch sau khi xử lý luồng $S=(a,b,a,c,a,b)$ với $w=4$, $d=2$. Ô $M[1][2] = 4$ chứa đụng độ giữa $a$ (tần suất 3) và $c$ (tần suất 1); thao tác $\min$ giúp QUERY cho $c$ lấy giá trị đúng ở hàng 2.
+
+Từ ví dụ và định lý trên có thể rút ra các đặc trưng của CMS. \textbf{Ưu điểm:} bộ nhớ cố định $O((1/\varepsilon)\log(1/\delta))$, không phụ thuộc $m$ hay $n$; UPDATE $O(d)$ \textit{worst-case} ổn định; ước lượng \textit{trên mức} --- an toàn cho bài toán phát hiện bất thường; hợp nhất được hai sketch bằng phép cộng ma trận (\textit{mergeable}); hỗ trợ cửa sổ trượt bằng biến thể hàng-vòng. \textbf{Nhược điểm:} randomized --- cần $d$ hàm băm độc lập (trong thực tế là $d$ seed khác nhau cho MurmurHash3); ước lượng có thiên lệch dương (bias) do đụng độ băm; không thể liệt kê (\textit{enumerate}) các phần tử có tần suất cao --- phải kết hợp với cấu trúc khác (CMS-Top-K) nếu cần.
+
+\paragraph{$\Rightarrow$ Kết quả: CMS thoả toàn bộ bốn yêu cầu.}
+Bộ nhớ $O((1/\varepsilon)\log(1/\delta))$ không phụ thuộc $m,n$ (thoả (i)); UPDATE $O(d)$ hằng số (thoả (ii)); ước lượng \textit{trên mức} để không bỏ sót (thoả (iii)); hợp nhất được bằng cộng ma trận $O(wd)$ để ghép sketch giữa các node (thoả (iv)). Mục tiếp theo xem xét một đối thủ lý thuyết --- Count Sketch --- và chỉ ra vì sao nó thất bại ở yêu cầu bộ nhớ.
+
+\section{Phương án D: Count Sketch (bị loại vì chi phí)}
+\label{sec:countsketch}
+
+Count Sketch \cite{charikar2004count} là biến thể sớm của CMS với hai khác biệt: (i) mỗi ô được cập nhật bằng $\pm 1$ thông qua hàm sign $s_i: U \to \{-1, +1\}$, (ii) truy vấn lấy \textit{median} thay vì \textit{min}. Điểm mạnh là ước lượng \textit{không thiên lệch} ($\mathbb{E}[\hat{f}_x] = f_x$), nhưng bộ nhớ tỉ lệ $O(1/\varepsilon^2)\cdot \log(1/\delta)$ --- lớn hơn CMS một bậc $1/\varepsilon$. Cormode \& Hadjieleftheriou \cite{cormode2008finding} cho thấy với $\varepsilon = 10^{-3}$, Count Sketch cần khoảng 1000 lần bộ nhớ so với CMS. Do đó Count Sketch chỉ phù hợp khi cần ước lượng không thiên lệch cho các toán tử đại số như tích vô hướng (inner product) và kích thước phép nối (join size), không phải mục tiêu .
+
+\paragraph{$\Rightarrow$ Kết quả loại trừ.}
+Count Sketch cho ước lượng \textit{không thiên lệch}, nhưng trong bài toán Point Query của đề tài, \textit{thiên lệch dương} của CMS không phải nhược điểm --- ngược lại, đó chính là tính chất giúp (iii) ``không bỏ sót bất thường''. Do đó lợi ích duy nhất của Count Sketch không áp dụng, trong khi chi phí bộ nhớ tăng $\sim 1000\times$ thì rất thực. \textbf{CMS vượt trội rõ ràng cho bài toán cụ thể này.}
+
+\section{Bảng so sánh tổng hợp}
+
+\subsection{So sánh định lượng: lý thuyết và bộ nhớ tuyệt đối}
+
+\begin{table}[H]
+  \centering
+  \caption{So sánh tổng hợp bốn phương án ước lượng tần suất.}
+  \label{tab:compare-summary}
+  \footnotesize
+  \begin{tabularx}{\linewidth}{@{}l >{\raggedright\arraybackslash}X >{\raggedright\arraybackslash}X >{\raggedright\arraybackslash}X >{\raggedright\arraybackslash}X@{}}
+    \toprule
+    \textbf{Tiêu chí} & \textbf{Hash Map} & \textbf{Misra-Gries} & \textbf{Count-Min Sketch} & \textbf{Count Sketch} \\
+    \midrule
+    Bộ nhớ        & $O(F_0)$   & $O(1/\varepsilon)$ & $O((1/\varepsilon)\log(1/\delta))$ & $O((1/\varepsilon^2)\log(1/\delta))$ \\
+    UPDATE        & $O(1)$ am. & $O(1)$ am.         & $O(d)$ wc.                         & $O(d)$ wc. \\
+    QUERY         & $O(1)$     & $O(1)$             & $O(d)$                             & $O(d)$ \\
+    Tính sai số   & chính xác  & $\le f_x$          & $\ge f_x$                          & hai phía \\
+    Cận sai số    & $0$        & $\varepsilon m$    & $\varepsilon m$ (xs $1-\delta$)    & $\varepsilon \|\mathbf{f}\|_2$ (xs $1-\delta$) \\
+    Deterministic & có         & có                 & không                              & không \\
+    Chống adversary & không    & có                 & có                                 & có \\
+    Mergeable     & có         & khó                & có (cộng ma trận)                  & có \\
+    Sliding window & khó       & khó                & có (vòng)                          & có \\
+    \bottomrule
+  \end{tabularx}
+\end{table}
+
+Để cụ thể hoá các công thức $O(\cdot)$ ở trên thành con số có thể kiểm tra, Bảng~\ref{tab:memory-absolute} quy đổi chúng sang đơn vị KB ở ba cấu hình tham số thường gặp trong thực tế. Giả sử mỗi counter dùng \texttt{uint64\_t} (8 byte). Mỗi entry của Hash Map chiếm trung bình 48 byte (khoá 4--8 byte + counter 8 byte + overhead con trỏ và load-factor của \texttt{std::unordered\_map} $\sim$30--40\%).
+
+\begin{table}[H]
+  \centering
+  \caption{So sánh bộ nhớ tuyệt đối ở ba cấu hình tham số.}
+  \label{tab:memory-absolute}
+  \small
+  \begin{tabular}{@{}l r r r r@{}}
+    \toprule
+    \textbf{Cấu hình} & \textbf{$\varepsilon$} & \textbf{$\delta$} & \textbf{\shortstack{CMS\\($w d \cdot 8$ B)}} & \textbf{\shortstack{Misra--Gries\\($k \cdot 48$ B)}} \\
+    \midrule
+    Giám sát nội bộ (nhạy cảm thấp)  & $10^{-2}$ & $10^{-2}$ & $\sim$11 KB ($w{=}272, d{=}5$)      & $\sim$4{,}7 KB ($k{=}100$) \\
+    Giám sát Zero-Trust (mặc định)    & $10^{-3}$ & $10^{-2}$ & $\sim$109 KB ($w{=}2718, d{=}5$)   & $\sim$47 KB ($k{=}1000$) \\
+    DDoS mitigation (độ nhạy cao)     & $10^{-4}$ & $10^{-3}$ & $\sim$1{,}6 MB ($w{=}27183, d{=}7$) & $\sim$469 KB ($k{=}10^4$) \\
+    \midrule
+    \textbf{Hash Map khi} $F_0 = 10^3$  & \multicolumn{2}{c}{chính xác}   & \multicolumn{2}{c}{$\sim$47 KB} \\
+    \textbf{Hash Map khi} $F_0 = 10^5$  & \multicolumn{2}{c}{chính xác}   & \multicolumn{2}{c}{$\sim$4{,}7 MB} \\
+    \textbf{Hash Map khi} $F_0 = 10^7$  & \multicolumn{2}{c}{chính xác}   & \multicolumn{2}{c}{$\sim$469 MB (không thực tế)} \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\noindent Bảng~\ref{tab:memory-absolute} quy đổi các công thức $O(\cdot)$ ở trên sang đơn vị KB tại ba cấu hình tham số tiêu biểu (giám sát nội bộ, Zero-Trust mặc định, DDoS mitigation), kèm ba kịch bản minh hoạ cho Hash Map vì bộ nhớ Hash Map phụ thuộc trực tiếp vào số khoá phân biệt $F_0$. Hai quan sát quan trọng: (i) với cấu hình mặc định cho giám sát theo tinh thần Zero Trust, CMS chỉ tốn $\sim$109 KB bất kể $F_0$, trong khi Hash Map cần $\sim$469 MB khi $F_0 = 10^7$ (một vụ tấn công IP\-spoofing có thể dễ dàng đạt được); (ii) Misra-Gries luôn tiết kiệm hơn CMS một hệ số $d\cdot \log(1/\delta)$ vì không có chiều sâu, nhưng đổi lại là ước lượng thiếu --- không phù hợp cho phát hiện bất thường.
+
+\subsection{Phân tích theo kịch bản và khẳng định lại lựa chọn}
+
+Các con số ở Bảng~\ref{tab:memory-absolute} chỉ có nghĩa khi đặt vào ngữ cảnh sử dụng cụ thể. Xét ba kịch bản tiêu biểu: \textbf{(1) giám sát lưu lượng bình thường ($F_0$ nhỏ, $m$ vừa)} --- Hash Map hợp lý khi $F_0 < 10^5$, tuy nhiên phương án này không chống được kẻ tấn công chủ động; \textbf{(2) phát hiện DDoS ($m \gg M$, đầu vào đối kháng)} --- CMS với $(\varepsilon = 10^{-3}, \delta = 10^{-2})$ tốn $\sim$40 KB, cho phép xử lý $> 10^6$ gói/giây trong khi giới hạn sai số, còn Hash Map sẽ sụp đổ vì tràn bộ nhớ; \textbf{(3) hệ thống phân tán đa node} --- CMS vượt trội nhờ tính \textit{mergeable}: mỗi node duy trì CMS cục bộ, tổng hợp bằng cộng ma trận $O(wd)$ không làm mất bảo đảm $(\varepsilon, \delta)$ trên sketch toàn cục, trong khi Misra-Gries không có tính chất này.
+
+Quá trình loại trừ từ Mục~\ref{sec:hashmap} đến Mục~\ref{sec:countsketch} kết hợp với ba kịch bản vừa nêu chứng minh đúng như phát biểu đầu chương (Mục~\ref{sec:cms-upfront}): \textbf{Count-Min Sketch với Conservative Update là phương án duy nhất thoả đồng thời cả bốn yêu cầu} (i)--(iv) của hệ thống. Các phương án khác đều thất bại ở ít nhất một yêu cầu --- chi tiết đã trình bày trong phễu loại trừ ở Hình~\ref{fig:decision-funnel}. Biến thể Conservative Update được ưu tiên vì phân phối lưu lượng mạng có tính chất Zipfian (một số ít IP chiếm đa số lưu lượng), chính là tình huống CU khai thác tốt nhất \cite{estan2003conservative}. Tham số thực dụng: $w = 2048$, $d = 5$, tổng bộ nhớ mỗi sketch $\approx 2048 \times 5 \times 8 = 80$ KB --- vừa đủ chứa trong L2 cache của CPU để duy trì thông lượng $>10^7$ ops/giây. Chương tiếp theo trình bày chi tiết cài đặt trong thư viện \texttt{libdsa}.
+
+\section{Kết luận chương}
+
+Chương này đã thực hiện đầy đủ \textit{phân tích so sánh} bốn phương án giải bài toán Point Query và xác nhận lựa chọn được công bố ở Mục~\ref{sec:cms-upfront}. Cụ thể: (i) trình bày từng phương án (Hash Map, Misra--Gries, Count-Min Sketch, Count Sketch) với pseudocode, độ phức tạp, minh hoạ chạy tay trên cùng luồng mẫu $S$; (ii) chỉ ra điểm thất bại của từng phương án ngoài CMS đối với bốn yêu cầu cốt lõi của hệ thống --- Hash Map vi phạm bộ nhớ, Misra--Gries chỉ ước lượng dưới mức nên không phát hiện được tăng đột biến, Count Sketch tốn bộ nhớ $O(1/\varepsilon^2)$ lớn hơn CMS một bậc; (iii) tổng hợp Bảng~\ref{tab:compare-summary} so sánh chín tiêu chí và Bảng~\ref{tab:memory-absolute} quy đổi bộ nhớ tuyệt đối ở ba cấu hình tham số; (iv) phân tích ba kịch bản sử dụng (giám sát thường, DDoS, đa node) để khẳng định CMS với Conservative Update là phương án duy nhất thoả đồng thời cả bốn ràng buộc. Chương kế tiếp tiến từ phân tích sang \textit{cài đặt}: trình bày kiến trúc thư viện \texttt{libdsa}, mã nguồn lõi của CountMinSketch và bộ kiểm thử đơn vị xác nhận lại các tính chất lý thuyết bằng dữ liệu thật.

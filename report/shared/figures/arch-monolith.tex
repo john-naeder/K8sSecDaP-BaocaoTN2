@@ -1,0 +1,33 @@
+% Kien truc mot khoi (monolithic) truyen thong + mo rong theo chieu doc. Chuong 2.
+\begin{tikzpicture}[font=\footnotesize, >={Stealth[length=2.2mm]},
+    node distance=0.7cm and 1.1cm,
+    cli/.style ={draw, rounded corners=2pt, fill=blue!8, align=center, minimum height=0.7cm},
+    fw/.style  ={draw, fill=red!12, align=center, minimum width=1.5cm, minimum height=1.6cm},
+    mod/.style ={draw, rounded corners=2pt, fill=orange!16, align=center,
+                 minimum width=4.2cm, minimum height=0.72cm},
+    db/.style  ={draw, cylinder, shape border rotate=90, aspect=0.28, fill=green!14,
+                 minimum width=1.7cm, minimum height=1.0cm, align=center},
+  ]
+  \node[cli] (cli) {Người dùng\\(Internet)};
+  \node[fw, right=of cli] (fw) {Tường lửa\\chu vi\\(Bắc--Nam)};
+  % Cac tang cua monolith
+  \node[mod, right=2.0cm of fw, yshift=1.45cm] (m1) {Tầng giao diện};
+  \node[mod, below=0.32cm of m1] (m2) {Tầng nghiệp vụ};
+  \node[mod, below=0.32cm of m2] (m3) {Tầng truy cập dữ liệu};
+  \node[db, below=0.5cm of m3] (db) {CSDL};
+  \draw[<->, gray!70] (m1) -- (m2);
+  \draw[<->, gray!70] (m2) -- (m3);
+  \draw[<->, gray!70] (m3) -- (db);
+  % Khung host (KHONG to nen de khong de len noi dung)
+  \node[draw, thick, rounded corners=3pt, fit=(m1)(m2)(m3)(db), inner sep=10pt,
+        label={[font=\bfseries]above:Máy chủ (VM / vật lý) --- một tiến trình}] (host) {};
+  \draw[->] (cli) -- (fw);
+  \draw[->] (fw.east) -- (host.west|-fw.east);
+  % Chu thich
+  \node[align=left, font=\scriptsize, below=0.2cm of host.south, anchor=north, text width=7.2cm]
+    {\textbf{Lời gọi giữa các tầng = trong tiến trình} (in-process), \emph{không} đi qua mạng
+     $\Rightarrow$ không có lưu lượng nội bộ để giám sát ở tầng mạng.};
+  % Mo rong doc
+  \draw[->, blue!60, line width=1pt] ($(host.north east)+(0.4,0)$) -- ++(0,-2.7)
+    node[midway, right, align=left, font=\scriptsize] {Mở rộng\\\textbf{theo chiều dọc}:\\thêm CPU/RAM\\cho cùng máy};
+\end{tikzpicture}

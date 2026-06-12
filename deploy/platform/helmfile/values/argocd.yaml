@@ -1,0 +1,35 @@
+global:
+  domain: argocd.zt.local        # override to actual exposed domain
+configs:
+  params:
+    server.insecure: "true"      # TLS terminated upstream (Traefik/Cloudflare)
+  cm:
+    application.resourceTrackingMethod: annotation
+controller:
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits:   { memory: 1Gi }
+server:
+  replicas: 1
+  resources:
+    requests: { cpu: 50m, memory: 128Mi }
+    limits:   { memory: 512Mi }
+repoServer:
+  replicas: 1
+  resources:
+    requests: { cpu: 50m, memory: 128Mi }
+    limits:   { memory: 512Mi }
+applicationSet:
+  enabled: true
+  replicas: 1
+  resources:
+    requests: { cpu: 25m, memory: 64Mi }
+    limits:   { memory: 256Mi }
+notifications:
+  enabled: false
+dex:
+  enabled: false
+redis:
+  resources:
+    requests: { cpu: 25m, memory: 64Mi }
+    limits:   { memory: 128Mi }

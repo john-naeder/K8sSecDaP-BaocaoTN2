@@ -1,0 +1,25 @@
+% Vi tri kprobe/kretprobe tren ham tcp_v4_connect trong ngan xep TCP. Chuong 2.
+\begin{tikzpicture}[font=\footnotesize, node distance=0.55cm,
+    lyr/.style ={draw, rounded corners=2pt, align=center, minimum height=0.8cm,
+                 minimum width=4.8cm, fill=gray!10},
+    hook/.style={draw, rounded corners=2pt, align=center, fill=green!14,
+                 minimum height=0.85cm, minimum width=3.0cm},
+    flow/.style={-{Stealth[length=2mm]}, thick},
+  ]
+  \node[lyr, fill=blue!10] (app) {Tiến trình trong Pod: \texttt{connect(fd, dst, len)}};
+  \node[lyr, below=of app] (sys) {Lời gọi hệ thống \texttt{\_\_sys\_connect}};
+  \node[lyr, below=of sys, fill=yellow!16] (fn) {\texttt{tcp\_v4\_connect(sk, uaddr, len)}};
+  \node[lyr, below=of fn] (hs) {Thiết lập kết nối / bắt tay 3 bước};
+
+  % kprobe + kretprobe gan tren tcp_v4_connect; tach xa nhau theo chieu doc
+  \node[hook, right=2.4cm of fn, yshift=1.05cm] (kentry) {\texttt{kprobe} (vào):\\lưu con trỏ \texttt{sock}};
+  \node[hook, right=2.4cm of fn, yshift=-1.05cm] (kret) {\texttt{kretprobe} (ra):\\đọc \texttt{sock}, sinh sự kiện};
+
+  \draw[flow] (app) -- (sys);
+  \draw[flow] (sys) -- (fn);
+  \draw[flow] (fn) -- (hs);
+  \draw[{Stealth}-, thick, green!50!black] (kentry.west) -- ($(fn.east)+(0,0.18)$);
+  \draw[{Stealth}-, thick, green!50!black] (kret.west) -- ($(fn.east)+(0,-0.18)$);
+  \node[font=\scriptsize\itshape, align=center, above=0.18cm of kentry]
+    {gắn động vào cùng một hàm nhân};
+\end{tikzpicture}

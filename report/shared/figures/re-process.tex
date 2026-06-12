@@ -1,0 +1,24 @@
+% Quy trinh ky nghe yeu cau va truy vet sang cac chuong sau. Chuong 1.
+\begin{tikzpicture}[font=\footnotesize, >={Stealth[length=2.4mm]}, node distance=0.55cm,
+    s1/.style={draw, rounded corners=3pt, align=center, fill=blue!10,
+               minimum width=2.5cm, minimum height=1.05cm},
+    s2/.style={draw, rounded corners=3pt, align=center, fill=green!12,
+               minimum width=2.5cm, minimum height=1.05cm},
+    flow/.style={->, very thick},
+  ]
+  \node[s1] (a) {Khảo sát\\nhu cầu\\\scriptsize(\S\ref{sec:survey-enterprise})};
+  \node[s1, right=of a] (b) {Nhu cầu\\N1--N5\\\scriptsize(\S\ref{subsec:needs})};
+  \node[s1, right=of b] (c) {Yêu cầu\\FR / NFR\\\scriptsize(\S\ref{sec:requirements})};
+  \node[s2, right=of c] (d) {Thiết kế\\\scriptsize(Ch.~\ref{ch:design})};
+  \node[s2, right=of d] (e) {Cài đặt\\\scriptsize(Ch.~\ref{ch:impl})};
+  \node[s2, right=of e] (f) {Đánh giá\\\scriptsize(Ch.~\ref{ch:eval})};
+
+  \foreach \x/\y in {a/b,b/c,c/d,d/e,e/f}{ \draw[flow] (\x)--(\y); }
+
+  \draw[decorate, decoration={brace, amplitude=6pt}]
+    ($(a.north west)+(0,0.2)$) -- ($(c.north east)+(0,0.2)$)
+    node[midway, above=8pt, font=\footnotesize\bfseries] {Chương~\ref{ch:overview} (xác định ``cần gì'')};
+  \draw[decorate, decoration={brace, amplitude=6pt, mirror}]
+    ($(d.south west)+(0,-0.2)$) -- ($(f.south east)+(0,-0.2)$)
+    node[midway, below=8pt, font=\footnotesize\itshape] {``làm thế nào''};
+\end{tikzpicture}

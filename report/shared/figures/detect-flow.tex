@@ -1,0 +1,28 @@
+% Luu do xu ly mot su kien ket noi qua cac giai thuat. Dung o Chuong 2.
+\begin{tikzpicture}[font=\footnotesize, node distance=0.75cm and 1.4cm,
+    start/.style={draw, rounded corners=9pt, fill=gray!12, align=center,
+                  minimum height=0.8cm, minimum width=3cm},
+    proc/.style ={draw, fill=blue!10, align=center, minimum height=0.8cm,
+                  minimum width=3.4cm},
+    dec/.style  ={draw, diamond, aspect=2.2, fill=yellow!20, align=center,
+                  inner sep=1pt},
+    alert/.style={draw, fill=orange!20, align=center, minimum height=0.8cm,
+                  minimum width=3.6cm},
+    flow/.style ={-{Stealth[length=2mm]}, thick},
+  ]
+  \node[start] (e) {Sự kiện \texttt{connect()}};
+  \node[proc, below=of e] (lpm) {Phân loại IP (LPM Trie)};
+  \node[proc, below=of lpm] (cms) {CMS: \texttt{record(src\_ip)}};
+  \node[dec, below=of cms] (chk) {ước lượng\\$> \theta$ ?};
+  \node[alert, right=of chk] (al) {Cảnh báo \texttt{port\_scan}\\$+$ bán kính ảnh hưởng (BFS)};
+  \node[proc, below=1.2cm of chk] (graph) {Cập nhật đồ thị truyền thông};
+  \node[proc, below=of graph] (scc) {Định kỳ: Tarjan SCC\\(phát hiện chu trình khả nghi)};
+
+  \draw[flow] (e) -- (lpm);
+  \draw[flow] (lpm) -- (cms);
+  \draw[flow] (cms) -- (chk);
+  \draw[flow] (chk) -- node[above, font=\scriptsize]{đúng} (al);
+  \draw[flow] (chk) -- node[right, font=\scriptsize]{sai} (graph);
+  \draw[flow] (al) |- (graph);
+  \draw[flow] (graph) -- (scc);
+\end{tikzpicture}

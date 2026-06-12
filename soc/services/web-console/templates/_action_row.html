@@ -1,0 +1,28 @@
+<tr id="action-{{ a.id }}">
+  <td>{{ a.id }}</td>
+  <td><a href="/incidents/{{ a.incident_id }}">#{{ a.incident_id }}</a></td>
+  <td>{{ a.type }}</td>
+  <td><span class="status-{{ a.status }}">{{ a.status }}</span>
+      {% if applied_to %}<br><small><code>{{ applied_to }}</code></small>{% endif %}
+      {% if a.error %}<br><small class="error">{{ a.error }}</small>{% endif %}
+  </td>
+  <td>{{ a.created_at }}</td>
+  <td>
+    {% if a.status == 'pending' %}
+      <form class="inline"
+            hx-post="/actions/{{ a.id }}/approve"
+            hx-target="#action-{{ a.id }}"
+            hx-swap="outerHTML">
+        <button type="submit">Approve</button>
+      </form>
+      <form class="inline"
+            hx-post="/actions/{{ a.id }}/reject"
+            hx-target="#action-{{ a.id }}"
+            hx-swap="outerHTML">
+        <button type="submit" class="muted">Reject</button>
+      </form>
+    {% else %}
+      <em>—</em>
+    {% endif %}
+  </td>
+</tr>

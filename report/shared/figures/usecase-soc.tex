@@ -1,0 +1,43 @@
+% Sơ đồ use-case hệ thống SOC. Dùng ở Chương 3.
+\begin{tikzpicture}[
+    every node/.style={font=\small},
+    uc/.style={draw, ellipse, fill=blue!8, align=center, minimum width=3.4cm,
+               minimum height=1.0cm, inner sep=2pt, font=\footnotesize},
+    act/.style={align=center, font=\footnotesize},
+    rel/.style={-, shorten >=1pt, shorten <=1pt},
+  ]
+  % --- Actor: stick figure macro (vẽ tay) ---
+  \newcommand{\actor}[3]{% (#1=name id)(#2=x,y)(#3=label)
+    \begin{scope}[shift={#2}]
+      \draw[thick] (0,0.55) circle (0.16);
+      \draw[thick] (0,0.39) -- (0,-0.15);
+      \draw[thick] (-0.22,0.18) -- (0.22,0.18);
+      \draw[thick] (0,-0.15) -- (-0.18,-0.5);
+      \draw[thick] (0,-0.15) -- (0.18,-0.5);
+      \node[act] (#1) at (0,-0.95) {#3};
+    \end{scope}}
+
+  \actor{analyst}{(0,4.6)}{Chuyên viên\\phân tích (Analyst)}
+  \actor{admin}{(0,0.6)}{Quản trị viên\\(Admin)}
+  \actor{attacker}{(12.4,2.6)}{Kẻ tấn công\\(external)}
+
+  % --- 6 use-case, gian cach doc 1.55cm de khong chong nhau ---
+  \node[uc] (u1) at (6.4,6.3) {Xem dashboard\\\& cảnh báo};
+  \node[uc] (u2) at (6.4,4.75) {Xem chi tiết\\sự cố};
+  \node[uc] (u3) at (6.4,3.2) {Xác nhận / đóng\\sự cố};
+  \node[uc] (u4) at (6.4,1.65) {Duyệt hành động\\phản hồi};
+  \node[uc] (u5) at (6.4,0.1) {Cách ly Pod\\(NetworkPolicy)};
+  \node[uc] (u6) at (6.4,-1.45) {Cấu hình ngưỡng\\\& người dùng};
+
+  % --- System boundary ---
+  \node[draw, rounded corners, fit={(4.5,-2.4) (8.3,7.4)}, inner sep=0pt,
+        label={[font=\small\bfseries]above:Hệ thống SOC K8sSecDaP}] (sys) {};
+
+  % analyst relations
+  \foreach \u in {u1,u2,u3} \draw[rel] (analyst) -- (\u);
+  % admin relations
+  \foreach \u in {u2,u4,u5,u6} \draw[rel] (admin) -- (\u);
+
+  % attacker triggers detection indirectly (dashed) -> noi toi bien he thong, tranh cat UC
+  \draw[rel, dashed] (attacker) -- node[below, font=\scriptsize, pos=0.55]{sinh lưu lượng quét} (u1.east);
+\end{tikzpicture}

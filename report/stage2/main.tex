@@ -1,0 +1,83 @@
+% ============================================================================
+% DO AN TOT NGHIEP — ZERO-TRUST NETWORK MAPPER (BC2)
+% Hoc vien Ky thuat Mat ma — Khoa Khoa hoc May tinh
+%
+% Build: latexmk -lualatex main.tex  (from this directory)
+% ============================================================================
+
+\documentclass[12pt, a4paper, oneside]{report}
+
+\newcommand{\outputDir}{../../output}
+
+\input{../shared/preamble}
+
+\begin{document}
+\hypersetup{pageanchor=false}
+
+\input{cover}
+
+\pagenumbering{roman}
+\setcounter{page}{1}
+
+\input{acknowledgment}
+\clearpage
+
+\input{commitment}
+\clearpage
+
+\input{mo-dau}                      % Mo dau — sau loi cam doan, TRUOC muc luc
+\clearpage
+
+\tableofcontents
+\clearpage
+
+\input{abbreviations-bc2}
+\clearpage
+
+\listoftables
+\clearpage
+
+\listoffigures
+\clearpage
+
+% === NOI DUNG ==============================================================
+\hypersetup{pageanchor=true}
+\pagenumbering{arabic}
+\setcounter{page}{1}
+
+% Cau truc 5 chuong (BC2 — do an tot nghiep):
+\input{chapters/ch-overview}        % 1. Tong quan
+\input{chapters/ch-foundations}     % 2. Co so ly thuyet va cong nghe
+\input{chapters/ch-design}          % 3. Phan tich va thiet ke he thong
+\input{chapters/ch-implementation}  % 4. Hien thuc he thong
+\input{chapters/ch-eval-conclusion} % 5. Danh gia va ket luan
+
+% === TAI LIEU THAM KHAO ===================================================
+
+\clearpage
+\phantomsection
+\addcontentsline{toc}{chapter}{TÀI LIỆU THAM KHẢO}
+\printbibliography[title={TÀI LIỆU THAM KHẢO}]
+
+% === PHU LUC ==============================================================
+
+\clearpage
+\begin{appendices}
+\setcounter{chapter}{0}
+\renewcommand{\chaptername}{Phụ lục}
+\renewcommand{\thechapter}{\Alph{chapter}}
+\renewcommand{\cftchappresnum}{Phụ lục~}
+\renewcommand{\cftchapaftersnum}{.\ }
+\renewcommand{\thepage}{PL-\arabic{page}}
+\setcounter{page}{1}
+
+\input{appendices/app-cms-code}
+\input{appendices/app-tarjan-bfs-code}
+\input{appendices/app-ebpf-code}
+\input{appendices/app-web-console-code}
+\input{appendices/app-sql}
+\input{appendices/app-demo}
+
+\end{appendices}
+
+\end{document}

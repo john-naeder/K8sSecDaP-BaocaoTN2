@@ -1,0 +1,229 @@
+% ============================================================================
+% CHUONG 5 (BC1): UNG DUNG PHAT HIEN BAT THUONG MANG VA DANH GIA
+% ============================================================================
+
+\chapter{ỨNG DỤNG VÀ ĐÁNH GIÁ}
+\label{ch:application}
+\label{ch:eval}
+
+Chương cuối cùng khép kín vòng lặp giữa cấu trúc dữ liệu trừu tượng đã phân tích ở các chương trước và đề tài: trước tiên trình bày \textit{một ứng dụng cụ thể} ---  pipeline phát hiện port-scan trên luồng địa chỉ IP --- để chứng minh rằng cấu trúc dữ liệu được chọn đủ mạnh để giải quyết bài toán nguyên thuỷ; sau đó \textit{đo định lượng} hiệu năng, bộ nhớ, độ chính xác trên cả luồng tổng hợp lẫn luồng IP; và cuối cùng tổng kết các tiêu chí đánh giá đối chiếu với yêu cầu đặt ra ở Chương~\ref{ch:problem}.
+
+\section{Ứng dụng phát hiện port-scan trên luồng IP}
+\label{sec:portscan-app}
+
+\subsection{Mô hình mối đe dọa và ánh xạ thuật toán}
+\label{sec:portscan-model}
+
+Quá trình quét cổng (\textit{port scan}) là bước đầu tiên trong hầu hết các kịch bản tấn công mạng có chủ đích: kẻ tấn công gửi hàng loạt gói TCP SYN tới nhiều địa chỉ và cổng đích để xác định dịch vụ nào đang lắng nghe. Bộ phát hiện xâm nhập kinh điển Snort \cite{roesch1999snort} liệt kê hai dấu hiệu định nghĩa một đợt quét: \textit{một địa chỉ IP nguồn} cùng \textit{số kết nối thử lớn bất thường} tới các \textit{đích/cổng phân tán} trong một \textit{khoảng thời gian ngắn}. Đặc trưng kỹ thuật của các gói SYN là cờ \texttt{SYN} bật và cờ \texttt{ACK} tắt --- gói đầu tiên của bắt tay ba bước TCP --- nên một bộ thu \texttt{tcpdump} đơn giản với biểu thức bộ lọc \texttt{tcp[tcpflags] \& tcp-syn != 0 and tcp[tcpflags] \& tcp-ack == 0} đủ để cô lập sự kiện port-scan ra khỏi mọi lưu lượng khác. Hệ Bro/Zeek \cite{paxson1999bro} sử dụng cùng lược đồ và tổng quát hoá thành mô hình \textit{một-nhiều}: một nguồn $\rightarrow$ nhiều đích trong cửa sổ thời gian ngắn.
+
+Phát biểu hình thức trên ngôn ngữ luồng dữ liệu, gọi $S = (a_1, \ldots, a_m)$ là luồng các sự kiện kết nối quan sát được trong cửa sổ $T$ và mỗi $a_j = (\textit{src\_ip}_j, \textit{dst\_ip}_j, \textit{dst\_port}_j, t_j)$. Đặt $f_x = |\{j : \textit{src\_ip}_j = x\}|$ là tần suất xuất hiện của địa chỉ nguồn $x$. Cảnh báo port-scan được phát ra khi
+\begin{equation}
+  f_x > \tau \quad \text{với một ngưỡng } \tau \text{ trong cửa sổ } T.
+  \label{eq:portscan-rule}
+\end{equation}
+Quy tắc này trực tiếp ánh xạ về bài toán Point Query đã phát biểu ở Chương~\ref{ch:problem}: thay vì truy vấn ``IP $x$ đã xuất hiện bao nhiêu lần?'' ta truy vấn ``IP $x$ đã xuất hiện vượt $\tau$ lần chưa?''. Nói cách khác, detector port-scan là một bộ truy vấn ngưỡng đứng trên một bộ ước lượng tần suất, và lời giải Point Query với bộ nhớ hằng số trở thành điều kiện đủ để xây dựng detector hoạt động trên luồng tốc độ cao. Lý do không thể giải bằng đếm chính xác trong môi trường vận hành thực có hai tầng: (i) \textit{quy mô} --- trên một nút giám sát Kubernetes, lưu lượng dao động $10^5$--$10^7$ sự kiện/giây với hàng chục đến hàng trăm nghìn IP nguồn phân biệt; (ii) \textit{đối kháng} --- kẻ tấn công có thể chủ động làm giả IP nguồn (\textit{IP spoofing}) để ép hash map mở rộng không kiểm soát \cite{crosby2003denial}.
+
+Bốn quyết định thiết kế ánh xạ Point Query thành detector port-scan cụ thể được tổng hợp trong Bảng~\ref{tab:portscan-params}.
+
+\begin{table}[H]
+  \centering
+  \caption{Tham số cấu hình của \texttt{PortScanDetector}.}
+  \label{tab:portscan-params}
+  \small
+  \begin{tabular}{@{}l l l@{}}
+    \toprule
+    \textbf{Tham số} & \textbf{Giá trị} & \textbf{Lập luận} \\
+    \midrule
+    Khóa            & \texttt{src\_ip}             & Bao phủ vertical/horizontal/coordinated scan \\
+    $\tau$ (ngưỡng)  & 40 kết nối / cửa sổ          & Cao hơn lưu lượng nền điển hình ($\sim$10--20) một cấp \\
+    $T$ (cửa sổ)     & 60 giây tumbling             & Đơn giản, không cần deque phụ trợ \\
+    CMS $w$          & 2048                         & $\varepsilon \approx e/w \approx 1.33 \times 10^{-3}$ \\
+    CMS $d$          & 5                            & $\delta \approx (1/e)^d \approx 6.7 \times 10^{-3}$ \\
+    MG $k$           & 64                           & Đủ giữ heavy hitters; sai số dưới $m/k$ \\
+    Hash Map         & ---                          & Baseline chính xác (memory không đảm bảo) \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\subsection{Kiến trúc pipeline tinh giản}
+\label{sec:portscan-pipeline}
+
+Pipeline được hiện thực hoá trong thư mục \texttt{tools/portscan-pipeline} của mã nguồn đính kèm. Hệ Zero-Trust Network Mapper đầy đủ (thuộc đồ án tốt nghiệp) còn bao gồm các giai đoạn thu thập sự kiện qua eBPF, dịch vụ tổng hợp đa nút trên NATS JetStream, lưu trữ sự cố trong PostgreSQL và áp dụng \texttt{NetworkPolicy} đáp ứng tự động. Trong phạm vi báo cáo, ta cô lập đúng phần \textit{lõi giải thuật} --- ba khối \texttt{tcpdump $\rightarrow$ parser $\rightarrow$ frequency estimator $\rightarrow$ alert} (Hình~\ref{fig:portscan-pipeline}) --- đủ để chứng minh tính khả thi và đo được chi phí của lớp ước lượng tần suất, không phụ thuộc vào hạ tầng phần cứng cụ thể nào.
+
+\begin{figure}[H]
+  \centering
+  \input{../shared/figures/portscan-pipeline}
+  \caption{Pipeline phát hiện port-scan tinh giản.}
+  \label{fig:portscan-pipeline}
+\end{figure}
+
+\noindent Hình~\ref{fig:portscan-pipeline} mô tả đường đi của sự kiện: nguồn dữ liệu (\texttt{tcpdump} hoặc generator tổng hợp) $\rightarrow$ parser (\texttt{tcpdump\_to\_events.py} kết hợp \texttt{parse\_event()}) $\rightarrow$ hàng đợi JSON Lines $\rightarrow$ ba bộ ước lượng tần suất (CMS, Misra--Gries, Hash Map) chạy song song trong cùng tumbling window 60\,s, ngưỡng 40 / \texttt{src\_ip} $\rightarrow$ \texttt{alerts.json}. Bốn quyết định thiết kế chính trong pipeline:
+
+\begin{itemize}
+  \item \textbf{Khoá là \texttt{src\_ip}} thay vì cặp \texttt{(src\_ip, dst\_port)}, để bao phủ cả ba dạng quét \textit{vertical} (một IP, nhiều cổng), \textit{horizontal} (một cổng, nhiều IP đích) và \textit{coordinated} hỗn hợp. Cài đặt thực hiện qua hàm tiện ích \texttt{record\_u32(src\_ip)} của giao diện \texttt{Estimator} đã trình bày ở Chương~\ref{ch:impl}.
+  \item \textbf{Tumbling window 60 giây}: khi $t_j - t_{\text{start}} > T$ thì gọi \texttt{reset()} làm sạch toàn bộ cấu trúc và bắt đầu cửa sổ mới, giữ chi phí cập nhật ở $O(d)$ thuần tuý của thuật toán nền. Sliding window cần cấu trúc phụ và được liệt kê trong hướng phát triển.
+  \item \textbf{Dedup mỗi cửa sổ}: khi tần suất ước lượng vượt ngưỡng, sự kiện đầu tiên kích hoạt cảnh báo và IP đó được thêm vào tập \texttt{alerted\_in\_window}. Các sự kiện sau cùng IP trong cùng cửa sổ không sinh thêm cảnh báo trùng.
+  \item \textbf{Hai chế độ đầu vào}: chế độ \textit{trực tiếp} dùng \texttt{tcpdump -nn -l -i any} với bộ lọc gói SYN; chế độ \textit{tái lập} dùng script \texttt{generate\_portscan\_stream.py} để sinh luồng JSON Lines tổng hợp với hạt giống cố định. Cả hai kết thúc bằng cùng một khuôn dạng JSON một dòng/sự kiện do \texttt{parse\_event()} (C++) đọc được.
+\end{itemize}
+
+\subsection{Cài đặt và minh họa từng bước}
+\label{sec:portscan-impl}
+
+Lớp \texttt{PortScanDetector} (Mã nguồn~\ref{lst:portscan-detector}) là cài đặt trực tiếp các quyết định ở Bảng~\ref{tab:portscan-params}. Detector tương tác với cấu trúc dữ liệu nền duy nhất qua giao diện \texttt{Estimator} đã giới thiệu ở Chương~\ref{ch:impl}, theo đúng tinh thần Strategy Pattern --- detector không biết bên dưới là CMS, MG hay HashMap, cho phép so sánh ba thuật toán trên cùng một luồng đầu vào.
+
+\lstinputlisting[
+  language=C++,
+  caption={Hàm \texttt{process()} của \texttt{PortScanDetector} --- ánh xạ một sự kiện thành thao tác cập nhật, ước lượng và phát cảnh báo.},
+  label=lst:portscan-detector,
+  firstline=82, lastline=108,
+]{../../tools/portscan-pipeline/detector.cpp}
+
+Để kiểm chứng cài đặt, đầu vào là 200 sự kiện do \texttt{generate\_portscan\_stream.py} sinh với hạt giống $42$: 100 sự kiện lưu lượng nền vi-dịch-vụ, 50 gói SYN từ attacker \texttt{10.0.5.99} chèn vào từ sự kiện thứ 100, rồi 50 sự kiện nền tiếp theo. Detector dừng tại các sự kiện 50, 100, 110, 120 và in trạng thái nội tại của estimator vào \texttt{output/portscan/trace\_cms.txt}.
+
+\lstinputlisting[
+  language={},
+  basicstyle=\ttfamily\footnotesize,
+  caption={Trích đoạn \texttt{output/portscan/trace\_cms.txt} --- trạng thái CMS tại bốn mốc sự kiện trên luồng IP tổng hợp.},
+  label=lst:portscan-trace-cms,
+  firstline=4, lastline=70,
+]{../../output/portscan/trace_cms.txt}
+
+\noindent Đọc theo thứ tự thời gian, trace cho thấy:
+
+\begin{itemize}
+  \item \textbf{Sự kiện 50, 100}: chỉ có lưu lượng nền. Các nguồn vi-dịch-vụ (\texttt{frontend-1}, \texttt{frontend-2}, \texttt{prometheus}) đứng quanh mốc 10--19 kết nối; attacker chưa xuất hiện nên \texttt{est(10.0.5.99) = 0}.
+  \item \textbf{Sự kiện 110, 120}: attacker bắt đầu quét, đếm tăng tuyến tính 10, 20 trong khi các nguồn nền giữ nguyên --- đặc trưng kinh điển của port-scan: một IP nguồn tăng tốc nhanh, các IP khác không đổi.
+  \item \textbf{Sự kiện 141} (sau khi đếm vượt ngưỡng): \texttt{est(10.0.5.99) = 41 > 40}, detector phát cảnh báo, IP attacker được thêm vào tập \texttt{alerted\_in\_window} và các sự kiện tiếp theo cùng IP không sinh thêm cảnh báo.
+\end{itemize}
+
+Kết quả đối chiếu với \texttt{output/portscan/alerts.json}: cả ba thuật toán đều phát cảnh báo tại cùng \texttt{event\_index = 141} với \texttt{freq = 41}.
+
+\section{Đánh giá thực nghiệm}
+\label{sec:eval}
+
+\subsection{Phương pháp và môi trường đánh giá}
+
+Hai kịch bản benchmark được sử dụng để đo định lượng cấu trúc dữ liệu trên hai loại đầu vào:
+
+\begin{itemize}
+  \item \textbf{Synthetic uniform} qua \texttt{libdsa/benchmarks/bench\_frequency.cpp} (Google Benchmark): sinh ngẫu nhiên $10^5$ khoá \texttt{uint32\_t} bằng \texttt{std::mt19937} với seed cố định 42, đo \textit{record} và \textit{estimate} riêng biệt.
+  \item \textbf{Port-scan IP stream} qua \texttt{tools/portscan-pipeline}: 200 sự kiện đã mô tả ở Mục~\ref{sec:portscan-impl}, đo memory đỉnh + thông lượng + true/false positive cho cả ba thuật toán.
+\end{itemize}
+
+Cấu hình máy đánh giá: CPU 16 nhân, L2 1280 KiB, RAM 16 GB, Linux Fedora 43 (kernel 6.19), build Debug --- thông lượng Release kỳ vọng cao hơn khoảng 2--3 lần.
+
+\subsection{Thông lượng và bộ nhớ trên luồng tổng hợp}
+
+\begin{table}[H]
+  \centering
+  \caption{Thông lượng \textit{record}/\textit{estimate} và bộ nhớ trên $10^5$ khoá phân biệt.}
+  \label{tab:throughput}
+  \begin{tabular}{@{}l r r r@{}}
+    \toprule
+    \textbf{Thuật toán} & \textbf{Chiều rộng $w$} & \textbf{Thông lượng (ops/s)} & \textbf{Bộ nhớ (KB)} \\
+    \midrule
+    CMS record (d=5)    & 512                     & $1{,}18 \times 10^{7}$       & 20{,}0 \\
+    CMS record (d=5)    & 1024                    & $1{,}18 \times 10^{7}$       & 40{,}0 \\
+    CMS record (d=5)    & 2048                    & $1{,}20 \times 10^{7}$       & 80{,}0 \\
+    CMS record (d=5)    & 4096                    & $1{,}15 \times 10^{7}$       & 160{,}0 \\
+    CMS estimate        & 2048                    & $8{,}87 \times 10^{6}$       & --- \\
+    \midrule
+    Hash Map record     & ---                     & $5{,}38 \times 10^{6}$       & 3808{,}5 \\
+    Hash Map estimate   & ---                     & $4{,}45 \times 10^{6}$       & --- \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\noindent Nguồn: \texttt{output/bench/throughput.csv}.
+
+Hai điểm đáng chú ý: (i) CMS \textit{record} gần như không đổi khi $w$ thay đổi --- khẳng định độ phức tạp $O(d)$ độc lập với $w$; (ii) CMS record nhanh hơn Hash Map record khoảng 2{,}2 lần dù phải băm $d = 5$ lần (Hash Map chỉ băm một lần) vì bộ nhớ tĩnh nằm gọn trong L2 cache trong khi Hash Map động chạm heap khi grow gây cache miss và phân mảnh. Bộ nhớ CMS với $(w=2048, d=5)$ đo được đúng 80{,}0 KB, độc lập số phần tử đã chèn; Hash Map đo được 3\,808{,}5 KB --- gấp \textbf{47{,}6 lần} --- trên cùng tập 100K khoá phân biệt; tỉ lệ này chỉ tăng khi $F_0$ lớn hơn vì CMS không đổi.
+
+\subsection{Sai số CMS theo chiều rộng}
+
+\begin{table}[H]
+  \centering
+  \caption{Sai số trung bình theo chiều rộng CMS ($d = 5$, $m = 10^5$).}
+  \label{tab:error-rate}
+  \begin{tabular}{@{}r r r r r@{}}
+    \toprule
+    \textbf{$w$} & \textbf{$\varepsilon \approx e/w$} & \textbf{Cận $\varepsilon m$} & \textbf{Sai số đo} & \textbf{Tỉ lệ đo/cận} \\
+    \midrule
+    256  & $1{,}062 \times 10^{-2}$ & 1062 & 368{,}3 & 34{,}7\% \\
+    512  & $5{,}31 \times 10^{-3}$  & 531  & 179{,}4 & 33{,}8\% \\
+    1024 & $2{,}65 \times 10^{-3}$  & 265  & 86{,}2  & 32{,}5\% \\
+    2048 & $1{,}33 \times 10^{-3}$  & 133  & 40{,}8  & 30{,}7\% \\
+    4096 & $6{,}64 \times 10^{-4}$  & 66{,}4 & 18{,}8 & 28{,}3\% \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\noindent Nguồn: \texttt{output/bench/error\_rate.csv}.
+
+Sai số thực tế luôn thấp hơn đáng kể cận lý thuyết --- khoảng $28$--$35\%$ của cận $\varepsilon m$. Hai nguyên nhân: (i) bất đẳng thức Markov dùng trong chứng minh là lỏng so với phân bố thực; (ii) thao tác \textit{min} trên $d$ hàng loại bỏ nhiễu các hàng xấu. Xu hướng giảm tỉ lệ đo/cận khi $w$ tăng phù hợp với trực giác: $w$ lớn hơn $\rightarrow$ ít đụng độ hơn $\rightarrow$ min càng gần giá trị đúng.
+
+\subsection{So sánh ba thuật toán trên luồng IP port-scan}
+\label{sec:portscan-eval}
+
+\begin{table}[H]
+  \centering
+  \caption{So sánh CMS / Misra-Gries / Hash Map trên luồng port-scan tổng hợp.}
+  \label{tab:portscan-comparison}
+  \small
+  \begin{tabular}{@{}l r r r r r r@{}}
+    \toprule
+    \textbf{Thuật toán} & \textbf{Sự kiện} & \textbf{Cảnh báo} & \textbf{TP} & \textbf{FP} & \textbf{Bộ nhớ (KB)} & \textbf{Thông lượng (sk/s)} \\
+    \midrule
+    Count-Min Sketch    & 200 & 1 & 1 & 0 & 80{,}02 & 229\,899 \\
+    Misra--Gries        & 200 & 1 & 1 & 0 & 0{,}42  & 147\,496 \\
+    Hash Map (chính xác)& 200 & 1 & 1 & 0 & 0{,}40  & 180\,788 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\noindent Nguồn: \texttt{output/portscan/comparison.csv}. Cấu hình thử nghiệm: $n = 200$ sự kiện, attacker bắt đầu chèn từ sự kiện thứ 100 với 50 gói SYN, ngưỡng $\tau = 40$ kết nối / \texttt{src\_ip}, cửa sổ tumbling 60\,s.
+
+Ba kết luận đáng chú ý:
+
+\begin{itemize}
+  \item \textbf{Cả ba phát hiện đúng một IP tấn công, không có cảnh báo giả.} Trên 11 IP phân biệt và 200 sự kiện, không có va chạm CMS đáng kể (xác suất $1/w = 1/2048$); MG có $k = 64$ lớn hơn số IP phân biệt nên không xảy ra giảm bộ đếm; HashMap đếm chính xác. Sự đồng thuận này khẳng định tính đúng đắn của cài đặt.
+  \item \textbf{CMS dùng nhiều bộ nhớ hơn MG và HashMap trên luồng nhỏ.} Trên 11 IP phân biệt, HashMap và MG chỉ chiếm $\sim$0{,}4 KB còn CMS chiếm cố định $w \times d \times 8 = 80$ KB \textit{bất kể} có bao nhiêu phần tử phân biệt. Lợi thế của CMS chỉ xuất hiện khi $F_0$ vượt khoảng $\sim 2\,000$ IP phân biệt --- tại đó HashMap vượt 80 KB. Khi đo trên $F_0 = 10^5$ ở Mục~\ref{tab:throughput}, HashMap chiếm 3\,808 KB so với CMS 80 KB (gấp 47{,}6 lần); kết quả nhất quán giữa hai cách đo.
+  \item \textbf{Thông lượng phụ thuộc cấu trúc dữ liệu chứ không phải kích thước.} CMS dẫn đầu vì 5 phép băm + 5 phép gán nằm gọn trong L2; HashMap chậm hơn vì bucket lookup gây cache miss khi grow; MG tốn thêm chi phí kiểm tra slot tồn tại + bước decrement-all khi map đầy.
+\end{itemize}
+
+Cảnh giới đặt ra: CMS không tự động là lựa chọn tốt --- nó tốt khi luồng đủ lớn. Trong môi trường vận hành thực có $F_0$ lớn và đầu vào đối kháng, bộ nhớ \textit{cố định} của CMS và tính \textit{mergeable} (cộng ma trận giữa các nút) là các thuộc tính khiến CMS vẫn là lựa chọn duy nhất phù hợp cho lớp giám sát data-plane. Trên luồng nhỏ, 80 KB là chi phí cố định cần chấp nhận để có được đặc tính tiệm cận đó.
+
+\section{Đánh giá tổng thể giải pháp}
+
+Count-Min Sketch đáp ứng cả năm tiêu chí được đặt ra ở Chương~\ref{ch:problem}:
+
+\begin{enumerate}
+  \item Bộ nhớ cố định 80 KB --- thoả yêu cầu bộ nhớ giới hạn và vừa vặn L2 cache.
+  \item Thao tác cập nhật là $O(d) = O(5)$ phép băm cố định --- thoả yêu cầu thời gian cập nhật hằng số.
+  \item Đảm bảo $(\varepsilon, \delta)$ được chứng minh đầy đủ và tái hiện trong kiểm thử đơn vị.
+  \item Thông lượng đủ lớn để xử lý luồng sự kiện $> 10^6$/giây, phù hợp ứng dụng giám sát mạng thực tế.
+  \item Thiên lệch \textit{trên mức} đảm bảo không bỏ sót phần tử nặng --- an toàn cho bài toán phát hiện bất thường.
+\end{enumerate}
+
+Yếu điểm chính là không thể liệt kê các phần tử có tần suất cao (cần kết hợp với cấu trúc phụ như min-heap) và bản chất randomized (tuy kiểm soát được qua tham số $\delta$). Các yếu điểm này được cân bằng bởi tính mergeable --- mở đường cho kiến trúc phân tán đa nút trong báo cáo tốt nghiệp.
+
+\section{Kết luận và hướng phát triển}
+
+Báo cáo đã giải quyết trọn vẹn bài toán ước lượng tần suất điểm trên luồng dữ liệu theo chu trình ``hình thức hoá $\rightarrow$ phân tích $\rightarrow$ thiết kế $\rightarrow$ cài đặt $\rightarrow$ ứng dụng $\rightarrow$ đánh giá''. Đóng góp cụ thể:
+
+\begin{itemize}
+  \item \textbf{Lý thuyết:} trình bày chứng minh đầy đủ bốn bước của định lý Cormode--Muthukrishnan bằng tiếng Việt, kèm giải thích ý nghĩa của từng bước và mối liên hệ với cận dưới Alon--Matias--Szegedy.
+  \item \textbf{Cài đặt:} thư viện \texttt{libdsa} modular với giao diện thuần ảo, Registry cấu hình, ba thuật toán tần suất và bộ kiểm thử đơn vị 23 test case toàn bộ xanh.
+  \item \textbf{Ứng dụng:} pipeline phát hiện port-scan tinh giản trong \texttt{tools/portscan-pipeline} chứng minh cấu trúc dữ liệu được phân tích là đủ để giải bài toán \textit{ứng dụng phát hiện bất thường mạng} đã đặt ra trong tên đề tài.
+  \item \textbf{Giảng dạy:} chương trình trace từng bước (Phụ lục~\ref{app:trace}) minh hoạ trực quan cách CMS và Misra--Gries hoạt động, hữu ích cho việc giảng dạy môn cấu trúc dữ liệu.
+\end{itemize}
+
+Đồ án tốt nghiệp môn Công nghệ phần mềm 2 sẽ tiếp tục các hướng sau, dựa trên nền tảng đã xây dựng:
+
+\begin{itemize}
+  \item \textbf{K-Hop Reachability (BFS):} tính toán \textit{blast radius} từ một nút bị xâm nhập, phục vụ khoanh vùng tác động sự cố.
+  \item \textbf{Tarjan SCC:} phát hiện chu trình trong đồ thị mạng, hỗ trợ phát hiện lateral movement.
+  \item \textbf{LPM Trie:} phân loại IP theo tập con mạng (subnet) để gán nhãn ``internal/external'' cho sự kiện eBPF.
+  \item \textbf{Tích hợp đầy đủ pipeline đa nút:} thay collector \texttt{tcpdump} ở Mục~\ref{sec:portscan-pipeline} bằng eBPF probe \texttt{kprobe/tcp\_v4\_connect} để bắt sự kiện ở \textit{kernel space}, bổ sung aggregator đa nút trên NATS JetStream với hợp nhất ma trận CMS, lưu sự cố vào PostgreSQL và phát \texttt{NetworkPolicy} cách ly tự động qua Kubernetes API server.
+  \item \textbf{Sliding window CMS:} thay tumbling window 60 s bằng cửa sổ trượt với cấu trúc CMS phân đoạn (\textit{segment-based}) để xử lý các đợt scan vắt qua biên cửa sổ.
+  \item \textbf{Conservative Update:} kích hoạt biến thể CMS-CU mặc định cho lưu lượng Zipfian thực tế, kỳ vọng giảm sai số 30--70\% theo \cite{estan2003conservative}.
+\end{itemize}

@@ -1,0 +1,60 @@
+% Sơ đồ thực thể - quan hệ (ERD) chi tiết của CSDL SOC (theo migrations 001-004). Chuong 3.
+\begin{tikzpicture}[
+    every node/.style={font=\scriptsize},
+    entity/.style={draw, rectangle split, rectangle split parts=2,
+                   rectangle split part fill={blue!14, gray!4},
+                   rounded corners=1pt, align=left, minimum width=3.4cm},
+    rel/.style={-, thick},
+    card/.style={midway, font=\scriptsize, fill=white, inner sep=1pt},
+  ]
+  \node[entity] (inc) {
+    \textbf{incidents}
+    \nodepart{second}
+    \underline{id} : bigserial (PK)\\
+    incident\_key : text (UQ)\\
+    type, source\_ip : text\\
+    severity, status : text\\
+    nodes\_observed : text[]\\
+    first/last\_seen\_ns : bigint\\
+    occurrence\_count : int\\
+    blast\_radius : jsonb\\
+    cross\_node : bool\\
+    pod\_name, pod\_namespace : text\\
+    created\_at, updated\_at : timestamptz};
+
+  \node[entity, right=3.0cm of inc.north east, anchor=north west] (act) {
+    \textbf{actions}
+    \nodepart{second}
+    \underline{id} : bigserial (PK)\\
+    incident\_id : bigint (FK)\\
+    type, status : text\\
+    yaml\_draft : text\\
+    target\_namespace : text\\
+    target\_pod\_label : text\\
+    approved\_by/at : text/ts\\
+    rejected\_by/at : text/ts\\
+    executed\_at : timestamptz\\
+    expires\_at, created\_at : timestamptz};
+
+  \node[entity, below=1.5cm of inc.south west, anchor=north west] (alr) {
+    \textbf{alerts}
+    \nodepart{second}
+    \underline{id} : bigserial (PK)\\
+    incident\_id : bigint (FK)\\
+    alert\_json : jsonb\\
+    received\_at : timestamptz};
+
+  \node[entity, below=1.5cm of act.south west, anchor=north west] (aud) {
+    \textbf{audit\_log}
+    \nodepart{second}
+    \underline{id} : bigserial (PK)\\
+    actor, actor\_role : text\\
+    action, target\_type : text\\
+    target\_id : bigint\\
+    diff : jsonb\\
+    occurred\_at : timestamptz};
+
+  \draw[rel] (inc.east) -- node[card,near start]{1} node[card,near end]{N} (act.west);
+  \draw[rel] (inc.south-|alr.north) -- node[card,near start]{1} node[card,near end]{N} (alr.north);
+  \draw[rel, dashed] (act.south-|aud.north) -- node[card]{tham chiếu} (aud.north);
+\end{tikzpicture}

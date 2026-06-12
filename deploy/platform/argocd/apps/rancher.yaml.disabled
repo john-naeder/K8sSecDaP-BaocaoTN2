@@ -1,0 +1,40 @@
+# Rancher — multi-cluster management UI. Optional in BC2; useful when GKE
+# is added and you want a single pane for both clusters. Cert via cert-manager.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: rancher
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    chart: rancher
+    repoURL: https://releases.rancher.com/server-charts/stable
+    targetRevision: "2.9.4"
+    helm:
+      releaseName: rancher
+      valuesObject:
+        hostname: rancher.zt.local
+        replicas: 1
+        bootstrapPassword: "rancher-bootstrap-change-me"
+        ingress:
+          enabled: true
+          ingressClassName: traefik
+          tls:
+            source: rancher          # rancher self-signed; swap to cert-manager-issued for production
+        antiAffinity: preferred
+        resources:
+          requests: { cpu: 250m, memory: 512Mi }
+          limits:   { cpu: 1, memory: 2Gi }
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: cattle-system
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true

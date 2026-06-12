@@ -1,0 +1,32 @@
+% Sơ đồ triển khai (topology) cụm K8s 3 node + GitOps. Dùng ở Chương 4.
+\begin{tikzpicture}[
+    node distance=0.5cm,
+    every node/.style={font=\footnotesize},
+    node3/.style={draw, rounded corners=2pt, fill=blue!6, align=center,
+                  minimum width=3.2cm, minimum height=1.7cm},
+    pod/.style={draw, rounded corners=1pt, fill=red!12, align=center,
+                font=\scriptsize, minimum width=2.6cm, minimum height=0.55cm},
+    svc/.style={draw, rounded corners=1pt, fill=green!12, align=center,
+                font=\scriptsize, minimum width=2.4cm, minimum height=0.55cm},
+    flow/.style={-{Stealth[length=2mm]}, thick},
+  ]
+  \node[node3, label=above:\textbf{master (control-plane)}] (m) {};
+  \node[pod] at ([yshift=0.35cm]m.center) (mc) {collector (DaemonSet)};
+  \node[svc] at ([yshift=-0.35cm]m.center) (ms) {NATS · Postgres · SOC};
+
+  \node[node3, right=1.0cm of m, label=above:\textbf{worker-1}] (w1) {};
+  \node[pod] at ([yshift=0.35cm]w1.center) (w1c) {collector (DaemonSet)};
+  \node[svc] at ([yshift=-0.35cm]w1.center) (w1s) {Pod mục tiêu (web/api)};
+
+  \node[node3, right=1.0cm of w1, label=above:\textbf{worker-home}] (w2) {};
+  \node[pod] at ([yshift=0.35cm]w2.center) (w2c) {collector (DaemonSet)};
+  \node[svc] at ([yshift=-0.35cm]w2.center) (w2s) {Pod ứng dụng};
+
+  \node[draw, rounded corners, fill=orange!14, align=center, below=1.3cm of w1,
+        minimum width=3.4cm] (argo) {ArgoCD (GitOps)\\Helm · Calico CNI};
+
+  \draw[flow] (w1c) -- (ms);
+  \draw[flow] (w2c) to[bend left=10] (ms);
+  \draw[flow] (argo) -- node[right,font=\scriptsize]{đồng bộ manifest} (w1);
+  \draw[flow] (argo) to[bend right=12] (m);
+\end{tikzpicture}

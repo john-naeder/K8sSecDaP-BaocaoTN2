@@ -1,0 +1,62 @@
+# Weekly summary report — runs Monday 06:00 UTC, covers the just-completed
+# ISO week (previous Mon..Sun). POSTs to incident-service which generates
+# HTML + uploads to MinIO zt-reports/ and audits the artefact.
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: weekly-report-token
+  namespace: soc
+type: Opaque
+stringData:
+  # Must match an admin entry in RBAC_TOKENS in incident-rbac-tokens.
+  ADMIN_TOKEN: admin-demo-token
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: weekly-report
+  namespace: soc
+  labels:
+    app.kubernetes.io/name: weekly-report
+    app.kubernetes.io/part-of: zero-trust-mapper
+spec:
+  schedule: "0 6 * * 1"             # Mon 06:00 UTC
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 5
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        spec:
+          restartPolicy: OnFailure
+          containers:
+            - name: trigger
+              image: curlimages/curl:8.10.1
+              env:
+                - { name: INCIDENT_API, value: "http://zt-incident-service.soc.svc.cluster.local:8080" }
+                - name: ADMIN_TOKEN
+                  valueFrom: { secretKeyRef: { name: weekly-report-token, key: ADMIN_TOKEN } }
+              command:
+                - sh
+                - -c
+                - |
+                  set -eu
+                  echo "[weekly-report] POST /api/v1/reports/weekly (upload=true)"
+                  curl -fsS -X POST \
+                    -H "Authorization: Bearer $ADMIN_TOKEN" \
+                    -H "Content-Type: application/json" \
+                    -d '{"upload": true}' \
+                    "$INCIDENT_API/api/v1/reports/weekly"
+                  echo
+                  echo "[weekly-report] done"
+              resources:
+                requests: { cpu: 50m, memory: 32Mi }
+                limits:   { cpu: 200m, memory: 64Mi }
+              securityContext:
+                runAsNonRoot: true
+                runAsUser: 1000
+                allowPrivilegeEscalation: false
+                capabilities: { drop: ["ALL"] }
+                seccompProfile: { type: RuntimeDefault }

@@ -1,0 +1,26 @@
+% Vi du LPM-Trie phan loai CIDR + tra cuu tien to dai nhat. Chuong 2.
+% Duong tra cuu duoc TO DAM; hop giai thich dat DUOI cay, tach khoi moi nut.
+\begin{tikzpicture}[font=\footnotesize, >={Stealth[length=2mm]},
+    n/.style  ={draw, rounded corners=2pt, align=center, minimum height=0.72cm,
+                fill=gray!10, inner sep=3pt},
+    pre/.style={draw, rounded corners=2pt, align=center, minimum height=0.72cm,
+                fill=green!16, inner sep=3pt},
+    hl/.style ={blue!70, line width=1.4pt},
+  ]
+  % Cay tien to (trie) gan nhan vung mang
+  \node[n]   (r)   at (0,0)      {gốc \texttt{0.0.0.0/0}\\$\rightarrow$ external (0)};
+  \node[n]   (a)   at (-3.0,-2.0){\texttt{10.0.0.0/8}\\(mạng riêng)};
+  \node[pre] (nod) at (3.0,-2.0) {\texttt{192.168.0.0/16}\\$\rightarrow$ node (3)};
+  \node[pre] (svc) at (-4.8,-4.1){\texttt{10.96.0.0/12}\\$\rightarrow$ service (2)};
+  \node[pre] (pod) at (-1.2,-4.1){\texttt{10.244.0.0/16}\\$\rightarrow$ pod (1)};
+  % Cac canh; duong tra cuu r -> a -> pod duoc to dam
+  \draw[hl,->] (r) -- (a);
+  \draw[->]    (r) -- (nod);
+  \draw[->]    (a) -- (svc);
+  \draw[hl,->] (a) -- (pod);
+  \node[blue!70, font=\scriptsize] at (-3.05,-3.05) {đường tra cứu};
+  % Hop giai thich dat DUOI cung, can giua, khong canh nao cat qua
+  \node[draw, dashed, rounded corners, align=center, fill=blue!4, inner sep=6pt] (q) at (0.2,-5.9)
+    {\textbf{Tra cứu} \texttt{10.244.0.5}: duyệt theo từng bit tiền tố; nút khớp \emph{sâu nhất}
+     $=$ \texttt{10.244.0.0/16} $\Rightarrow$ nhãn \textbf{pod (1)} (tiền tố dài nhất thắng).};
+\end{tikzpicture}

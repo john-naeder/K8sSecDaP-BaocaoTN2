@@ -1,0 +1,95 @@
+% ============================================================================
+% BAO CAO STAGE 1 — CONG NGHE PHAN MEM 1
+% Hoc vien Ky thuat Mat ma — Khoa Khoa hoc May tinh
+%
+% De tai: Phan tich va cai dat cau truc du lieu uoc luong tan suat
+%         tren luong du lieu — Ung dung phat hien bat thuong mang
+%
+% Build: latexmk -lualatex main.tex  (from this directory)
+% ============================================================================
+
+\documentclass[12pt, a4paper, oneside]{report}
+
+% --- Shared-asset paths (resolved relative to this main.tex) -----------------
+\newcommand{\outputDir}{../../output}
+
+% --- Preamble (packages, formatting) ----------------------------------------
+\input{../shared/preamble}
+
+% ============================================================================
+\begin{document}
+\hypersetup{pageanchor=false}
+
+% === PHAN MO DAU (danh so La Ma) ============================================
+
+\input{cover}
+
+\pagenumbering{roman}
+\setcounter{page}{1}
+
+\input{acknowledgment}
+\clearpage
+
+\tableofcontents
+\clearpage
+
+\input{../shared/abbreviations}
+\clearpage
+
+\listoftables
+\clearpage
+
+\listoffigures
+\clearpage
+
+% Mở đầu vẫn nằm trong phần đánh số La Mã.
+\input{introduction}
+\clearpage
+
+% === PHAN NOI DUNG (danh so A Rap, bat dau tu Ch.1 = trang 1) ===============
+\pagenumbering{arabic}
+\setcounter{page}{1}
+\hypersetup{pageanchor=true}
+
+% Ch1. Bai toan (BC1-only, narrowed)
+\input{chapters/ch1-problem}
+
+% Ch2. Co so ly thuyet (shared)
+\input{../shared/chapters-shared/ch-cms-theory}
+
+% Ch3. Phan tich va so sanh giai thuat (shared)
+\input{../shared/chapters-shared/ch-cms-compare}
+
+% Ch4. Thiet ke va cai dat (shared)
+\input{../shared/chapters-shared/ch-cms-impl}
+
+% Ch5. Ung dung va danh gia (BC1-only) — gop ung dung port-scan + benchmark + ket luan
+\input{chapters/ch5-eval}
+
+% === TAI LIEU THAM KHAO =====================================================
+
+\clearpage
+\phantomsection
+\addcontentsline{toc}{chapter}{TÀI LIỆU THAM KHẢO}
+\printbibliography[title={TÀI LIỆU THAM KHẢO}]
+
+% === PHU LUC ================================================================
+
+\clearpage
+\hypersetup{pageanchor=false}
+\begin{appendices}
+\setcounter{chapter}{0}
+\renewcommand{\chaptername}{PHỤ LỤC}
+\renewcommand{\thechapter}{\Alph{chapter}}
+\renewcommand{\cftchappresnum}{PHỤ LỤC~}
+\renewcommand{\cftchapaftersnum}{.\ }
+\renewcommand{\thepage}{PL-\arabic{page}}
+\setcounter{page}{1}
+\hypersetup{pageanchor=true}
+
+\input{appendices/app-code}
+\input{appendices/app-trace}
+
+\end{appendices}
+
+\end{document}

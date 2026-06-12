@@ -1,0 +1,56 @@
+% Lưu đồ pipeline phát hiện port-scan tinh giản dùng trong Chương 5.
+% Include từ ch5-eval.tex.
+\begin{tikzpicture}[
+    node distance=0.7cm and 0.9cm,
+    every node/.style={font=\small},
+    src/.style   ={draw, rectangle, rounded corners=2pt, minimum width=2.4cm,
+                   minimum height=0.9cm, align=center, fill=gray!12},
+    parser/.style={draw, rectangle, rounded corners=2pt, minimum width=2.6cm,
+                   minimum height=0.9cm, align=center, fill=blue!10},
+    queue/.style ={draw, rectangle, rounded corners=2pt, minimum width=2.4cm,
+                   minimum height=0.9cm, align=center, fill=yellow!18},
+    algo/.style  ={draw, rectangle, rounded corners=2pt, minimum width=3.2cm,
+                   minimum height=0.9cm, align=center, fill=green!15},
+    sink/.style  ={draw, rectangle, rounded corners=2pt, minimum width=2.6cm,
+                   minimum height=0.9cm, align=center, fill=orange!18},
+    flow/.style  ={-{Stealth[length=2.5mm]}, thick},
+  ]
+  % Hàng 1: nguồn dữ liệu
+  \node[src] (tcpdump) {\texttt{tcpdump -nn}\\\textit{TCP SYN}};
+  \node[src, right=of tcpdump] (synth) {\texttt{generate\_}\\\texttt{portscan\_stream.py}};
+
+  % Hàng 2: parser
+  \node[parser, below=1.0cm of $(tcpdump)!0.5!(synth)$] (parser)
+    {\texttt{tcpdump\_to\_events.py}\\$+$ \texttt{parse\_event()}};
+
+  % Hàng 3: queue (JSON Lines)
+  \node[queue, below=of parser] (queue)
+    {JSON Lines\\\texttt{\{src\_ip,dst\_ip,dst\_port,...\}}};
+
+  % Hàng 4: 3 estimator song song
+  \node[algo, below left=1.0cm and 0.3cm of queue] (cms) {Count-Min\\Sketch};
+  \node[algo, below=of queue]                       (mg)  {Misra--Gries};
+  \node[algo, below right=1.0cm and 0.3cm of queue] (hm)  {Hash Map\\(chính xác)};
+
+  % Khung tumbling window
+    \node[draw, dashed, rounded corners=4pt, fit=(cms) (mg) (hm),
+      inner sep=8pt]
+      (window) {};
+      \node[font=\footnotesize, fill=white, inner sep=2pt, anchor=south, yshift=2pt]
+        at (window.north)
+        {Tumbling window 60\,s, ngưỡng = 40 / src\_ip};
+
+  % Hàng 5: alert
+  \node[sink, below=1.6cm of mg] (alerts) {\texttt{alerts.json}\\\textit{port\_scan}};
+
+  % Mũi tên
+  \draw[flow] (tcpdump.south) -- (parser.north -| tcpdump.south);
+  \draw[flow] (synth.south)   -- (parser.north -| synth.south);
+  \draw[flow] (parser) -- (queue);
+  \draw[flow] (queue.south) -- ++(0,-0.15) -| (cms.north);
+  \draw[flow] (queue.south) -- (mg.north);
+  \draw[flow] (queue.south) -- ++(0,-0.15) -| (hm.north);
+  \draw[flow] (cms.south) |- (alerts.west);
+  \draw[flow] (mg.south)  -- (alerts.north);
+  \draw[flow] (hm.south)  |- (alerts.east);
+\end{tikzpicture}

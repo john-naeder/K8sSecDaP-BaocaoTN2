@@ -1,0 +1,33 @@
+% DFD mức 1 (phân rã tiến trình SOC). Dùng ở Chương 3.
+\begin{tikzpicture}[
+    node distance=1.0cm and 2.7cm,
+    every node/.style={font=\footnotesize},
+    proc/.style={draw, circle, fill=blue!12, align=center, minimum size=1.8cm},
+    ext/.style={draw, fill=gray!10, align=center, minimum width=2.2cm, minimum height=0.9cm},
+    store/.style={draw, fill=orange!14, align=center, minimum width=2.4cm, minimum height=0.7cm},
+    flow/.style={-{Stealth[length=2mm]}, thick, font=\scriptsize},
+  ]
+  \node[ext] (kernel) {Nhân Linux\\(node)};
+  \node[proc, right=of kernel] (p1) {1.0\\Thu thập};
+  \node[proc, right=of p1] (p2) {2.0\\Phát hiện};
+  \node[proc, right=of p2] (p3) {3.0\\Quản lý\\sự cố};
+  \node[ext, right=of p3] (analyst) {Analyst};
+  \node[proc, below=2.0cm of p3] (p4) {4.0\\Phản hồi};
+  \node[ext, left=of p4] (k8s) {K8s API};
+
+  % Kho du lieu: dat duoi tien trinh sinh ra no de tranh cat ngang
+  \node[store, below=0.9cm of p1] (d2) {D2: cảnh báo};
+  \node[store, below=0.9cm of p2] (d1) {D1: sự cố};
+
+  \draw[flow] (kernel) -- node[above]{\texttt{connect()}} (p1);
+  \draw[flow] (p1) -- node[above, align=center]{sự kiện\\chuẩn hoá} (p2);
+  \draw[flow] (p2) -- node[above]{cảnh báo} (p3);
+  \draw[flow] (p2) -- (d2);
+  \draw[flow] (p3) to[bend right=10] (d1);
+  \draw[flow] (p3) -- node[above]{hiển thị} (analyst);
+  \draw[flow] (analyst.south) to[bend left=20] node[right]{duyệt} (p4.east);
+  \draw[flow] (p3) -- node[right]{yêu cầu cách ly} (p4);
+  \draw[flow] (p4) -- node[above]{NetworkPolicy} (k8s);
+  \node[store, below=0.9cm of p4] (d3) {D3: kiểm toán};
+  \draw[flow] (p4) -- (d3);
+\end{tikzpicture}

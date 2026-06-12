@@ -1,0 +1,31 @@
+% So do nen tang tong the (platform stack): tu nhan Linux (duoi) toi ung dung (tren).
+% Nhan manh diem quan sat o tang nhan. Dung o Chuong 2.
+\begin{tikzpicture}[font=\footnotesize, >={Stealth[length=2.2mm]},
+    layer/.style={draw, rounded corners=2pt, minimum width=11.4cm,
+                  minimum height=1.02cm, align=center},
+  ]
+  % Ung dung o TREN cung, nhan Linux o DUOI cung
+  \node[layer, fill=red!12] (l6)
+    {\textbf{Ứng dụng đặc thù} --- collector (DaemonSet) $\cdot$ pipeline đa-DSA $\cdot$ SOC (incident / response / web-console)};
+  \node[layer, fill=orange!14, below=0.16cm of l6] (l5)
+    {\textbf{Phân phối \& tự động hóa} --- GitOps ArgoCD $\cdot$ CI Tekton $\cdot$ Harbor registry};
+  \node[layer, fill=green!12, below=0.16cm of l5] (l4)
+    {\textbf{Dịch vụ nền} --- NATS JetStream $\cdot$ PostgreSQL $\cdot$ Prometheus / Grafana};
+  \node[layer, fill=blue!12, below=0.16cm of l4] (l3)
+    {\textbf{Điều phối \& mạng} --- Kubernetes $+$ CNI Calico (\texttt{NetworkPolicy})};
+  \node[layer, fill=gray!10, below=0.16cm of l3] (l2)
+    {\textbf{Runtime container} --- \texttt{containerd}};
+  \node[layer, fill=gray!20, line width=1pt, below=0.16cm of l2] (l1)
+    {\textbf{Phần cứng \& nhân Linux 6.8} --- eBPF (kprobe, CO-RE, BTF) $\cdot$ RingBuf $\cdot$ LPM-Trie};
+
+  % Truc chieu cao tang
+  \draw[->, gray!55, line width=0.8pt] ($(l1.south west)+(-0.35,0)$) -- ($(l6.north west)+(-0.35,0)$);
+  \node[gray!70, rotate=90, font=\scriptsize, anchor=south] at ($(l1.south west)!0.5!(l6.north west)+(-0.55,0)$)
+    {hạ tầng $\rightarrow$ ứng dụng};
+
+  % Chu thich nhan manh tang nhan (node co text width -> khong tran le)
+  \node[draw=red!70, line width=0.9pt, rounded corners, align=left, font=\scriptsize,
+        fill=red!4, text width=3.05cm, right=0.55cm of l1] (note)
+    {\textbf{Điểm quan sát:} ứng dụng đọc sự kiện kết nối \emph{ngay ở tầng nhân} --- không cần tác nhân trong ứng dụng, không phụ thuộc biên mạng.};
+  \draw[->, red!70, line width=0.9pt] (note.west) -- (l1.east);
+\end{tikzpicture}

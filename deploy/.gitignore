@@ -1,0 +1,10 @@
+*.env
+.env*
+secrets/
+*.key
+*.pem
+# real cloudflared/harbor secrets (keep *.example)
+**/secret.yaml
+!**/secret.yaml.example
+.DS_Store
+.idea/

@@ -1,0 +1,10 @@
+metric,value
+node,userver-worker-1
+window_seconds,9.20
+connects_measured,12105
+connects_per_second,1316
+avg_ns_entry_kprobe,180
+avg_ns_return_kretprobe,1529
+avg_ns_per_connect_total,1709
+total_kprobe_cpu_ns,20686275
+kprobe_cpu_core_percent,0.2249

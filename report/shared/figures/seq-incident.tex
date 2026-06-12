@@ -1,0 +1,25 @@
+% Sequence: tao + lam giau su co. Chuong 3.
+\begin{tikzpicture}[font=\footnotesize, >={Stealth[length=2mm]},
+    ll/.style ={draw, rounded corners=2pt, fill=blue!8, align=center,
+                minimum height=0.72cm, minimum width=2.2cm},
+    msg/.style={-{Stealth[length=2mm]}, thick},
+    ret/.style={-{Stealth[length=2mm]}, thick, dashed},
+  ]
+  \def\yb{-6.0}
+  \node[ll] (a) at (0,0)    {NATS};
+  \node[ll] (b) at (3.4,0)  {incident-service};
+  \node[ll] (c) at (7.4,0)  {K8s API};
+  \node[ll] (d) at (10.6,0) {PostgreSQL};
+  \foreach \n in {a,b,c,d}{ \draw[dashed, gray!60] (\n.south) -- ++(0,\yb); }
+
+  \draw[msg] (0,-1.3) -- node[above]{cảnh báo \texttt{port\_scan}} (3.4,-1.3);
+  % self: tao su co
+  \draw[msg] (3.4,-2.1) -- ++(0.7,0) -- ++(0,-0.45) -- (3.4,-2.55);
+  \node[right, font=\scriptsize] at (4.1,-2.3) {tạo sự cố};
+  \draw[msg] (3.4,-3.15) -- node[above]{tra cứu pod theo \texttt{src\_ip}} (7.4,-3.15);
+  \draw[ret] (7.4,-3.75) -- node[above]{pod (tên, namespace)} (3.4,-3.75);
+  \draw[msg] (3.4,-4.45) -- node[above]{lưu sự cố $+$ ngữ cảnh pod} (10.6,-4.45);
+  % self: sinh ban nhap NetworkPolicy
+  \draw[msg] (3.4,-5.25) -- ++(0.7,0) -- ++(0,-0.45) -- (3.4,-5.7);
+  \node[right, font=\scriptsize] at (4.1,-5.45) {sinh bản nháp \texttt{NetworkPolicy}};
+\end{tikzpicture}

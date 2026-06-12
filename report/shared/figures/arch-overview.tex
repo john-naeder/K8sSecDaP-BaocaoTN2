@@ -1,0 +1,85 @@
+% So do tong quat kien truc he thong K8sSecDaP (phong cach Hinh 34).
+% Logo PNG o ../shared/figures/logos/ (graphicspath da tro toi shared/figures).
+\begin{tikzpicture}[
+  font=\footnotesize, >={Stealth[length=2.2mm]},
+  svc/.style ={draw, rounded corners=2pt, fill=white, align=center,
+               minimum width=2.9cm, minimum height=1.3cm, inner sep=2pt},
+  store/.style={draw, rounded corners=2pt, fill=blue!5, align=center,
+               minimum width=2.5cm, minimum height=1.2cm, inner sep=2pt},
+  bus/.style ={draw, rounded corners=2pt, fill=green!7, align=center,
+               minimum width=1.8cm, minimum height=3.6cm},
+  flow/.style ={->, thick, draw=black!75},
+  dflow/.style={->, very thick, draw=orange!80!black},
+  ctrl/.style ={->, thick, draw=blue!60!black, dashed},
+  band/.style ={font=\footnotesize\bfseries, anchor=west, text=black!65},
+]
+% ---------- Actors (trai) ----------
+\node[draw, fill=yellow!12, rounded corners=2pt, align=center, minimum width=2.3cm,
+      minimum height=1.0cm] (admin) at (0,6.6) {Quản trị viên\\/ Analyst};
+\node[draw, fill=red!8, rounded corners=2pt, align=center, minimum width=2.3cm,
+      minimum height=1.1cm] (pods) at (0,2.2) {Pod ứng dụng\\/ Pod tấn công};
+\node[svc, fill=cyan!7, minimum width=2.0cm] (ingress) at (3.0,4.4)
+  {Cloudflared\\$+$ Traefik\\\scriptsize(ingress)};
+
+% ================= CUM KUBERNETES =================
+% --- Bang 1: phat hien (DaemonSet) ---
+\node[svc] (collector) at (7.2,8.0) {collector (eBPF)\\\includegraphics[height=0.46cm]{logos/ebpf.png}};
+\node[svc] (pipeline)  at (10.6,8.0) {pipeline\\\scriptsize CMS\,·\,Tarjan\,·\,BFS\,·\,LPM};
+\node[svc] (bridge)    at (14.0,8.0) {alert-bridge};
+
+% --- Bang 2: SOC ---
+\node[svc, fill=cyan!4] (console) at (14.0,5.7) {web-console\\\scriptsize Flask + HTMX};
+\node[bus] (nats) at (7.2,3.7) {NATS\\JetStream\\\includegraphics[height=0.46cm]{logos/nats.png}};
+\node[svc] (agg)  at (10.6,4.9) {aggregator\\\scriptsize tương quan / cross-node};
+\node[svc] (inc)  at (14.0,3.5) {incident-service\\\scriptsize sự cố·chính sách·RBAC};
+\node[store] (pg) at (17.3,3.5) {PostgreSQL\\\includegraphics[height=0.46cm]{logos/postgresql.png}};
+
+% --- Bang 3: quan trac + thuc thi ---
+\node[svc, minimum width=2.4cm] (prom) at (9.0,1.0) {Prometheus\\\includegraphics[height=0.42cm]{logos/prometheus.png}};
+\node[svc, minimum width=2.4cm] (graf) at (12.0,1.0) {Grafana\\\includegraphics[height=0.42cm]{logos/grafana.png}};
+\node[svc, minimum width=2.4cm] (k8s)  at (17.3,1.0) {K8s API + Calico\\\includegraphics[height=0.42cm]{logos/calico.png}};
+\node[draw, fill=red!7, rounded corners=2pt, align=center, minimum width=2.2cm,
+      minimum height=0.9cm] (quar) at (17.3,-0.8) {Pod bị cách ly\\\scriptsize (egress-deny)};
+
+% --- Hop cum + nhan ---
+\node[draw, dashed, very thick, draw=black!55, rounded corners=6pt, inner sep=16pt,
+      fit=(collector)(pipeline)(bridge)(console)(nats)(agg)(inc)(pg)(prom)(graf)(k8s)(quar)] (zk8s) {};
+\node[font=\small\bfseries, anchor=north east] at ([xshift=-4pt,yshift=-2pt]zk8s.north east)
+  {Cụm Kubernetes \;\includegraphics[height=0.42cm]{logos/kubernetes.png}};
+\node[band] at ([yshift=10pt]collector.north west) {Mặt phẳng phát hiện — DaemonSet mỗi node};
+\node[band] at ([xshift=-6pt,yshift=20pt]nats.north west) {Trung tâm vận hành an ninh (SOC)};
+\node[band] at ([xshift=-6pt,yshift=14pt]prom.north west) {Quan trắc \& Thực thi chính sách};
+
+% ---------- Nen tang GitOps/CI (duoi) ----------
+\node[svc, minimum width=2.3cm] (argo)   at (7.2,-3.6) {ArgoCD\\\includegraphics[height=0.42cm]{logos/argo.png}};
+\node[svc, minimum width=2.3cm] (tekton) at (10.6,-3.6) {Tekton (CI)\\\includegraphics[height=0.42cm]{logos/tekton.png}};
+\node[store, minimum width=2.3cm] (harbor) at (14.0,-3.6) {Harbor\\\includegraphics[height=0.42cm]{logos/harbor.png}};
+\node[draw, dashed, draw=black!55, rounded corners=6pt, inner sep=12pt,
+      fit=(argo)(tekton)(harbor)] (zplat) {};
+\node[font=\footnotesize\bfseries, text=black!65, anchor=north west]
+  at ([xshift=4pt,yshift=-3pt]zplat.south west) {Nền tảng GitOps / CI};
+
+% ================= LUONG =================
+\draw[flow] (admin) -| (ingress.north);
+\draw[flow] (ingress) |- (console.west);
+\draw[<->, thick, draw=black!75] (console.south) -- node[right,font=\scriptsize]{REST} (inc.north);
+% data plane (cam)
+\draw[dflow] (pods.east) -- ++(0.5,0) |- node[pos=0.78,above,font=\scriptsize]{\texttt{connect()}} (collector.west);
+\draw[dflow] (collector) -- (pipeline);
+\draw[dflow] (pipeline) -- (bridge);
+\draw[dflow] (bridge.south) -- (14,6.55) -- node[above,font=\scriptsize]{\texttt{zt.alerts.raw}} (7.2,6.55) -- (nats.north);
+% SOC
+\draw[dflow] (nats) -- node[above,font=\scriptsize]{alerts} (agg);
+\draw[flow] (agg) -- node[above,font=\scriptsize]{enriched} (inc);
+\draw[flow] (inc) -- (pg);
+% thuc thi (control — xanh)
+\draw[ctrl] (inc) -- node[right,font=\scriptsize]{áp NetworkPolicy} (k8s);
+\draw[ctrl] (k8s) -- (quar);
+% quan trac
+\draw[flow] (pipeline.south) -- (prom.north);
+\draw[flow] (prom) -- (graf);
+% GitOps
+\draw[ctrl] (argo.north) -- node[left,font=\scriptsize]{sync} (zk8s.south-|argo.north);
+\draw[flow] (tekton) -- node[below,font=\scriptsize]{push} (harbor);
+\draw[ctrl] (harbor.north) -- node[right,font=\scriptsize]{pull image} (zk8s.south-|harbor.north);
+\end{tikzpicture}

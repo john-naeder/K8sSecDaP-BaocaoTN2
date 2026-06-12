@@ -1,0 +1,96 @@
+# build-slot-lock Task — simple slot-based build queue for small clusters
+# Acquire mode: claim one of N shared slots before build starts.
+# Release mode: free any slot owned by the current PipelineRun.
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: build-slot-lock
+  namespace: tekton-pipelines
+  labels:
+    app.kubernetes.io/part-of: slsa-pipeline
+spec:
+  description: >-
+    Provide slot-based concurrency control for PipelineRuns on small clusters.
+  params:
+    - name: mode
+      description: acquire or release
+      type: string
+      default: acquire
+    - name: max-slots
+      description: Maximum concurrent build slots
+      type: string
+      default: "2"
+    - name: lock-id
+      description: Unique owner ID (typically PipelineRun UID)
+      type: string
+    - name: lock-prefix
+      description: Prefix for slot ConfigMaps
+      type: string
+      default: build-slot
+    - name: namespace
+      description: Namespace where lock ConfigMaps are stored
+      type: string
+      default: tekton-pipelines
+  steps:
+    - name: lock
+      image: dtzar/helm-kubectl:3.14.4
+      computeResources:
+        requests:
+          cpu: 50m
+          memory: 64Mi
+        limits:
+          cpu: 200m
+          memory: 128Mi
+      script: |
+        #!/bin/sh
+        set -eu
+
+        mode="$(params.mode)"
+        max_slots="$(params.max-slots)"
+        lock_id="$(params.lock-id)"
+        lock_prefix="$(params.lock-prefix)"
+        namespace="$(params.namespace)"
+
+        if [ "${mode}" = "acquire" ]; then
+          echo "Acquiring build slot (max=${max_slots}) for ${lock_id}"
+          while true; do
+            for i in $(seq 1 "${max_slots}"); do
+              slot_name="${lock_prefix}-${i}"
+              create_out="$(kubectl -n "${namespace}" create configmap "${slot_name}" \
+                --from-literal=owner="${lock_id}" \
+                --from-literal=createdAt="$(date -u +%Y-%m-%dT%H:%M:%SZ)" 2>&1)" || true
+
+              if echo "${create_out}" | grep -qi "created"; then
+                echo "Acquired slot: ${slot_name}"
+                exit 0
+              fi
+
+              if echo "${create_out}" | grep -Eqi "forbidden|unauthorized|permission"; then
+                echo "Failed to acquire slot due to RBAC/auth error: ${create_out}"
+                exit 1
+              fi
+
+              if [ -n "${create_out}" ] && ! echo "${create_out}" | grep -qi "already exists"; then
+                echo "Slot acquire transient error for ${slot_name}: ${create_out}"
+              fi
+            done
+            echo "All build slots are busy. Waiting 10s..."
+            sleep 10
+          done
+        fi
+
+        if [ "${mode}" = "release" ]; then
+          echo "Releasing build slots owned by ${lock_id}"
+          for i in $(seq 1 "${max_slots}"); do
+            slot_name="${lock_prefix}-${i}"
+            owner="$(kubectl -n "${namespace}" get configmap "${slot_name}" -o jsonpath='{.data.owner}' 2>/dev/null || true)"
+            if [ "${owner}" = "${lock_id}" ]; then
+              kubectl -n "${namespace}" delete configmap "${slot_name}" --ignore-not-found=true >/dev/null 2>&1 || true
+              echo "Released slot: ${slot_name}"
+            fi
+          done
+          exit 0
+        fi
+
+        echo "Unsupported mode: ${mode}. Expected acquire or release."
+        exit 1

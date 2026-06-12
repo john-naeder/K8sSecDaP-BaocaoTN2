@@ -1,0 +1,150 @@
+# update-manifest Task — update K8s deployment manifest with new image digest
+# Part of the SLSA L3 GitOps promote flow:
+#   build → sign → promote (this task) → ArgoCD auto-sync → Kyverno verify
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: update-manifest
+  namespace: tekton-pipelines
+  labels:
+    app.kubernetes.io/part-of: slsa-pipeline
+spec:
+  description: >-
+    Update a K8s deployment manifest with a new image digest (sha256 pinned),
+    then commit and push to Git. This triggers ArgoCD to auto-sync the new
+    deployment, which Kyverno will verify before allowing.
+  params:
+    - name: image
+      description: "Full image reference WITH tag (e.g. harbor.kythuat.vn/demo/demo-api:latest)"
+      type: string
+    - name: digest
+      description: "Image digest (sha256:xxx)"
+      type: string
+    - name: manifest-path
+      description: "Path to deployment manifest relative to repo root"
+      type: string
+      default: "apps/demo-api/base/deployment.yaml"
+    - name: manifest-repo-url
+      description: "SSH URL of GitOps manifests repository"
+      type: string
+      default: "git@github.com:john-naeder/gitops-manifests.git"
+    - name: manifest-repo-branch
+      description: "Target branch in GitOps manifests repository"
+      type: string
+      default: "main"
+    - name: git-user-name
+      description: "Git commit author name"
+      type: string
+      default: "tekton-pipeline"
+    - name: git-user-email
+      description: "Git commit author email"
+      type: string
+      default: "tekton@slsa-platform.local"
+  workspaces:
+    - name: source
+      description: Workspace containing the cloned Git repo
+    - name: ssh-directory
+      optional: true
+      description: SSH credentials for pushing to Git
+  steps:
+    - name: update-and-push
+      image: alpine/git:2.47.2
+      computeResources:
+        requests:
+          cpu: 100m
+          memory: 96Mi
+        limits:
+          cpu: 300m
+          memory: 256Mi
+      env:
+        - name: HOME
+          value: /tmp/tekton-home
+        - name: PARAM_IMAGE
+          value: $(params.image)
+        - name: PARAM_DIGEST
+          value: $(params.digest)
+        - name: PARAM_MANIFEST
+          value: $(params.manifest-path)
+        - name: PARAM_MANIFEST_REPO_URL
+          value: $(params.manifest-repo-url)
+        - name: PARAM_MANIFEST_REPO_BRANCH
+          value: $(params.manifest-repo-branch)
+        - name: PARAM_GIT_NAME
+          value: $(params.git-user-name)
+        - name: PARAM_GIT_EMAIL
+          value: $(params.git-user-email)
+        - name: WORKSPACE_SOURCE_PATH
+          value: $(workspaces.source.path)
+        - name: WORKSPACE_SSH_DIRECTORY_BOUND
+          value: $(workspaces.ssh-directory.bound)
+        - name: WORKSPACE_SSH_DIRECTORY_PATH
+          value: $(workspaces.ssh-directory.path)
+      script: |
+        #!/usr/bin/env sh
+        set -eu
+
+        mkdir -p "${HOME}"
+        cd "${WORKSPACE_SOURCE_PATH}"
+
+        # ── Setup SSH if provided ──
+        if [ "${WORKSPACE_SSH_DIRECTORY_BOUND}" = "true" ]; then
+          SSH_KEY=""
+          for f in "${WORKSPACE_SSH_DIRECTORY_PATH}"/id_*; do
+            case "$f" in *.pub) continue ;; esac
+            SSH_KEY="$f"
+            break
+          done
+
+          if [ -n "${SSH_KEY}" ]; then
+            mkdir -p "${HOME}/.ssh"
+            cp -L "${SSH_KEY}" "${HOME}/.ssh/key"
+            chmod 600 "${HOME}/.ssh/key"
+
+            KNOWN_HOSTS_OPT="-o StrictHostKeyChecking=no"
+            if [ -f "${WORKSPACE_SSH_DIRECTORY_PATH}/known_hosts" ]; then
+              cp -L "${WORKSPACE_SSH_DIRECTORY_PATH}/known_hosts" "${HOME}/.ssh/known_hosts"
+              KNOWN_HOSTS_OPT="-o UserKnownHostsFile=${HOME}/.ssh/known_hosts"
+            fi
+
+            export GIT_SSH_COMMAND="ssh -i ${HOME}/.ssh/key ${KNOWN_HOSTS_OPT} -o IdentitiesOnly=yes"
+          fi
+        fi
+
+        # ── Clone GitOps manifests repository ──
+        MANIFEST_REPO_DIR="/tmp/gitops-manifests"
+        rm -rf "${MANIFEST_REPO_DIR}"
+        git clone --branch "${PARAM_MANIFEST_REPO_BRANCH}" "${PARAM_MANIFEST_REPO_URL}" "${MANIFEST_REPO_DIR}"
+        cd "${MANIFEST_REPO_DIR}"
+
+        # ── Strip tag from image reference to get base name ──
+        # e.g. harbor.kythuat.vn/demo/demo-api:latest → harbor.kythuat.vn/demo/demo-api
+        IMAGE_BASE=$(echo "${PARAM_IMAGE}" | sed 's/:.*$//')
+        IMAGE_REF="${IMAGE_BASE}@${PARAM_DIGEST}"
+
+        echo "📦 Updating image to: ${IMAGE_REF}"
+        echo "📝 Manifest: ${PARAM_MANIFEST}"
+
+        # ── Update image reference in deployment manifest ──
+        # Match any line containing "image:" with demo-api (or the image name)
+        IMAGE_NAME=$(basename "${IMAGE_BASE}")
+        sed -i "s|image: .*${IMAGE_NAME}.*|image: ${IMAGE_REF}|g" "${PARAM_MANIFEST}"
+
+        echo "✅ Updated manifest:"
+        grep "image:" "${PARAM_MANIFEST}"
+
+        # ── Commit and push ──
+        git config user.name "${PARAM_GIT_NAME}"
+        git config user.email "${PARAM_GIT_EMAIL}"
+        git add "${PARAM_MANIFEST}"
+
+        # Skip if no changes (idempotent)
+        if git diff --cached --quiet; then
+          echo "ℹ️  No changes to commit (manifest already up to date)"
+          exit 0
+        fi
+
+        git commit -m "[skip ci] promote: ${IMAGE_NAME}@${PARAM_DIGEST}"
+        git push origin HEAD:"${PARAM_MANIFEST_REPO_BRANCH}"
+
+        echo "✅ Pushed updated manifest to GitOps repo"
+        echo "🔄 ArgoCD will auto-sync the new deployment"

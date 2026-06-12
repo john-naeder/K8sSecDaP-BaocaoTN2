@@ -1,0 +1,341 @@
+% ============================================================================
+% PHU LUC B: KET QUA TRACE CHAY TUNG BUOC
+% ============================================================================
+
+\chapter{KẾT QUẢ CHẠY VÀ DỮ LIỆU ĐẦU RA}
+\label{app:trace}
+
+Phụ lục này tổng hợp toàn bộ output chính của stage~1, gồm:
+\texttt{tools/trace\_algorithms}, ứng dụng phát hiện port-scan, và dữ liệu
+đo hiệu năng/trực quan hóa dùng trong đánh giá. Mục đích là minh họa
+\emph{bằng dữ liệu thật} các tính chất lý thuyết đã chứng minh trong
+Chương~\ref{ch:compare}:
+\begin{itemize}
+    \item Count-Min Sketch \emph{ước lượng vượt} ($\hat f(x) \ge f(x)$).
+    \item Misra--Gries \emph{ước lượng thiếu} ($\hat f(x) \le f(x)$)
+          với sai số bị chặn bởi $m/k$.
+    \item Hai giải thuật \emph{kẹp} tần suất thật giữa hai giá trị.
+\end{itemize}
+
+\noindent\textbf{Dữ liệu đầu vào.} Luồng
+$S = \langle a, b, a, c, a, b, d, a \rangle$, độ dài $m = 8$.
+Tần suất chính xác: $f(a)=4$, $f(b)=2$, $f(c)=1$, $f(d)=1$, $f(e)=0$.
+
+\noindent\textbf{Tham số.} Count-Min Sketch với
+$w=4, d=2$; Misra--Gries với $k=3$ (tối đa $k-1=2$ bộ đếm).
+Kích thước nhỏ được chọn có chủ đích để toàn bộ ma trận và bảng đếm
+in được trực tiếp vào báo cáo.
+
+\noindent\textbf{Ghi chú về nguồn dữ liệu.} Các listing trong phụ lục này
+được lấy trực tiếp từ output sinh ra khi chạy thực nghiệm trên máy, và
+được ghi lại dưới thư mục \texttt{output/} để đảm bảo tái lập.
+
+\section{Menu và chế độ chạy}
+\label{sec:trace:menu}
+
+Menu của chương trình \texttt{trace\_algorithms} khi chạy không tham số:
+
+\lstinputlisting[style=pseudo,
+    basicstyle=\ttfamily\scriptsize,
+    caption={Menu \texttt{trace\_algorithms} (\texttt{output/appendix/trace\_algorithms\_help.txt})},
+    label={lst:trace-menu}]{\outputDir/appendix/trace_algorithms_help.txt}
+
+\section{Count-Min Sketch}
+\label{sec:trace:cms}
+
+Mỗi bước gồm: chỉ số cột $h_r(x) \bmod w$ trên từng hàng, phép
+\texttt{+= 1} tương ứng và toàn bộ ma trận sau khi cập nhật. Phần
+\textsc{QUERIES} liệt kê tất cả truy vấn cùng với tập cell được lấy min.
+
+\lstinputlisting[style=pseudo,
+    basicstyle=\ttfamily\scriptsize,
+    caption={Count-Min Sketch --- trace đầy đủ (\texttt{output/appendix/trace\_algorithms\_cms.txt})},
+    label={lst:trace:cms}]{\outputDir/appendix/trace_algorithms_cms.txt}
+
+\paragraph{Nhận xét.}
+Ở bước 8, khóa \texttt{d} có $f(d)=1$ nhưng $\hat f(d)=6$. Lý do:
+hai cell của \texttt{d} là $(0,0)$ và $(1,0)$ \emph{trùng hoàn toàn}
+với hai cell của khóa nóng \texttt{a}. Đây là minh họa cụ thể cho
+hiện tượng va chạm hash làm giảm độ chính xác khi $w$ nhỏ. Khi $w$ tăng
+theo công thức $w = \lceil e/\varepsilon \rceil$, xác suất xảy ra tình
+huống tương tự giảm tuyến tính theo $\varepsilon$.
+
+\section{Misra--Gries}
+\label{sec:trace:mg}
+
+Mỗi bước chỉ rõ một trong ba nhánh: (1) khóa đã có trong $T$ nên tăng
+bộ đếm, (2) khóa mới và $|T| < k-1$ nên thêm vào, (3) khóa mới và
+$|T| = k-1$ nên \emph{giảm toàn bộ} rồi loại các bộ đếm về 0.
+
+\lstinputlisting[style=pseudo,
+    basicstyle=\ttfamily\scriptsize,
+    caption={Misra--Gries --- trace đầy đủ (\texttt{output/appendix/trace\_algorithms\_misra.txt})},
+    label={lst:trace:mg}]{\outputDir/appendix/trace_algorithms_misra.txt}
+
+\paragraph{Nhận xét.}
+Hai sự kiện \emph{decrement-all} xảy ra ở bước 4 và bước 7, mỗi sự kiện
+loại hai bộ đếm cùng một đơn vị. Với $m=8$ và $k=3$ ta có $m/k = 2$,
+trùng đúng với sai số lớn nhất quan sát được trên khóa \texttt{a}
+($f=4, \hat f=2$). Điều này khớp với định lý Misra--Gries:
+$f(x) - \hat f(x) \le m/k$.
+
+\section{So sánh}
+\label{sec:trace:compare}
+
+Bảng dưới đây đặt cạnh nhau kết quả của ba phương pháp: đếm chính xác
+(HashMap), Count-Min Sketch và Misra--Gries trên cùng luồng
+$S = \langle a, b, a, c, a, b, d, a \rangle$.
+
+\lstinputlisting[style=pseudo,
+    basicstyle=\ttfamily\scriptsize,
+    caption={So sánh ba phương pháp (\texttt{output/appendix/trace\_algorithms\_compare.txt})},
+    label={lst:trace:compare}]{\outputDir/appendix/trace_algorithms_compare.txt}
+
+\paragraph{Kết luận.}
+Với mỗi khóa, $\textsc{MG}(x) \le f(x) \le \textsc{CMS}(x)$, tức là
+Misra--Gries và Count-Min Sketch tạo thành một \emph{cặp chặn hai phía}
+cho tần suất thật. Trong thực tế, việc chạy \emph{đồng thời} hai cấu
+trúc trên cùng một luồng dữ liệu với kích thước nhỏ ($O(\log n)$ ô
+nhớ) cho phép trả lời hai câu hỏi: (i) khóa này có phải heavy hitter
+không? (dùng Misra--Gries), (ii) tần suất ước lượng tối đa của khóa
+đó là bao nhiêu? (dùng CMS).
+
+\paragraph{Cách tái tạo.}
+Để sinh lại các file output trên, từ thư mục gốc của dự án chạy:
+
+\begin{lstlisting}[style=pseudo, basicstyle=\ttfamily\scriptsize, breaklines=true,
+                   breakatwhitespace=false, columns=fullflexible, frame=single]
+cmake -S . -B build
+cmake --build build --target trace_algorithms
+
+OUT=output/appendix
+./build/tools/trace_algorithms          > $OUT/trace_algorithms_help.txt 2>&1
+./build/tools/trace_algorithms cms      > $OUT/trace_algorithms_cms.txt
+./build/tools/trace_algorithms misra    > $OUT/trace_algorithms_misra.txt
+./build/tools/trace_algorithms compare  > $OUT/trace_algorithms_compare.txt
+\end{lstlisting}
+
+\noindent Các file được ghi dưới \texttt{output/appendix/} để in trực tiếp vào báo cáo.
+
+\section{Output ứng dụng phát hiện port-scan}
+\label{sec:trace:portscan-output}
+
+Phần này liệt kê toàn bộ output của pipeline phát hiện port-scan khi chạy
+\texttt{scripts/run\_portscan\_demo.sh}. Input là luồng JSONL tổng hợp,
+output gồm trace nội bộ của ba thuật toán, cảnh báo và bảng so sánh.
+
+\subsection{Kịch bản tấn công trên cụm Kubernetes}
+\label{sec:trace:k8s-attack}
+
+Trước khi đi vào dữ liệu thô, Hình~\ref{fig:k8s-attack-scenario} minh hoạ
+kịch bản tấn công mà luồng \texttt{sample\_stream.jsonl} mô phỏng. Topology
+giả lập một cụm Kubernetes nhỏ có 11 pod chia thành bốn subnet --- frontend
+(\texttt{10.0.1.X}), backend (\texttt{10.0.2.X}), database/cache
+(\texttt{10.0.3.X}) và infra (\texttt{10.0.4.X}) --- cộng thêm một pod attacker
+(\texttt{10.0.5.99}) nằm ngoài subnet ứng dụng. Mũi tên xám là lưu lượng nền
+hợp lệ giữa các pod theo các \textit{NORMAL\_FLOWS} của
+\texttt{generate\_portscan\_stream.py}; mũi tên đỏ nét đứt là 50 gói TCP SYN do
+attacker phát ra trong khoảng 5\,ms, mỗi gói tới một cặp
+$(\textit{dst\_ip}, \textit{dst\_port})$ ngẫu nhiên trong các subnet ứng dụng.
+
+\begin{figure}[H]
+  \centering
+  \resizebox{\linewidth}{!}{\input{../shared/figures/k8s-attack-scenario}}
+  \caption{Kịch bản tấn công port-scan trên cụm Kubernetes giả lập.}
+  \label{fig:k8s-attack-scenario}
+\end{figure}
+
+\noindent Pipeline phát hiện đứng ở phía bên phải, tap vào lưu lượng SYN qua
+\texttt{tcpdump}, đẩy qua parser thành \texttt{NetworkEvent}, rồi cho ba bộ
+ước lượng tần suất xử lý song song. Khi tần suất ước lượng của
+\texttt{src\_ip = 10.0.5.99} vượt ngưỡng $\tau = 40$ trong cửa sổ tumbling
+60\,s, một bản ghi cảnh báo được phát ra ở \texttt{alerts.json}. Sự kiện đầu
+tiên kích hoạt cảnh báo đúng tại sự kiện thứ 141 của luồng (50 gói background
+trước attack + 50 gói background xen kẽ + 41 gói scan đầu tiên), trùng đúng
+với phân tích thực nghiệm ở Mục~\ref{sec:portscan-impl} của Chương~\ref{ch:eval}.
+
+Đặc trưng \emph{một-nhiều} của port-scan thấy rất rõ trong hình: từ một IP
+nguồn duy nhất (attacker) toả ra nhiều mũi tên đỏ tới hầu hết các pod hợp lệ
+trong cụm, trong khi mỗi pod nền chỉ có một vài mũi tên xám tới các đối tác
+được phép theo kiến trúc dịch vụ. Đây cũng là lý do detector chọn khoá là
+\texttt{src\_ip} chứ không phải cặp \textit{(IP, cổng)}: dù attacker đổi đích
+hay đổi cổng, mọi gói vẫn rơi vào cùng một bộ đếm.
+
+\subsection{Menu và log chạy end-to-end}
+\label{sec:trace:portscan-menu}
+
+\lstinputlisting[style=pseudo,
+    basicstyle=\ttfamily\scriptsize,
+    caption={Menu \texttt{portscan-pipeline} (\texttt{output/appendix/portscan\_pipeline\_help.txt})},
+    label={lst:portscan-help}]{\outputDir/appendix/portscan_pipeline_help.txt}
+
+\noindent Menu liệt kê tất cả tham số CLI: chọn thuật toán
+(\texttt{--algo cms|mg|hashmap|all}), trỏ tới file đầu vào
+(\texttt{--input PATH}), đường ra (\texttt{--trace-dir},
+\texttt{--alerts}, \texttt{--comparison}), và các siêu tham số của từng cấu
+trúc dữ liệu. Tham số mặc định khớp với cấu hình trong
+Bảng~\ref{tab:portscan-params}.
+
+\lstinputlisting[style=pseudo,
+    basicstyle=\ttfamily\scriptsize,
+    caption={Log chạy demo end-to-end (\texttt{output/appendix/portscan\_demo\_stdout.txt})},
+    label={lst:portscan-demo-stdout}]{\outputDir/appendix/portscan_demo_stdout.txt}
+
+\noindent Log lần lượt báo: số dòng đầu vào đọc được, kết quả mỗi thuật toán
+(số sự kiện đã xử lý, số cảnh báo, bộ nhớ đỉnh, thông lượng), nội dung từng
+cảnh báo (IP nguồn, tần suất ước lượng, chỉ số sự kiện), và cuối cùng đường
+dẫn các file output. Cả ba thuật toán cùng phát một cảnh báo cho
+\texttt{10.0.5.99} tại sự kiện \texttt{\#141} với
+$\hat f = 41$ --- đúng ngưỡng $+1$ --- xác nhận tính nhất quán giữa CMS, MG
+và HashMap trên cùng đầu vào.
+
+\subsection{Luồng sự kiện đầu vào}
+\label{sec:trace:portscan-stream}
+
+\lstinputlisting[style=pseudo,
+    basicstyle=\ttfamily\scriptsize,
+    caption={Luồng sự kiện tổng hợp (\texttt{output/portscan/sample\_stream.jsonl})},
+    label={lst:portscan-stream}]{\outputDir/portscan/sample_stream.jsonl}
+
+\noindent File JSON Lines này là \emph{ground truth} cho toàn bộ phụ lục.
+Mỗi dòng là một sự kiện kết nối với bốn trường \texttt{src\_ip},
+\texttt{dst\_ip}, \texttt{dst\_port}, \texttt{timestamp\_ns}. 100 dòng đầu là
+lưu lượng nền (mỗi dòng cách nhau 1\,ms), 50 dòng tiếp theo là gói SYN từ
+attacker (mỗi dòng cách nhau 0{,}1\,ms --- mật độ gấp 10 lần lưu lượng nền,
+chính là điểm signature mà CMS phát hiện), và 50 dòng cuối là lưu lượng nền
+sau attack. Hạt giống cố định \texttt{seed = 42} đảm bảo file này tái tạo
+được bit-identical bằng \texttt{python3 scripts/generate\_portscan\_stream.py
+--seed 42 --count 200 --attack-start 100 --scan-probes 50}.
+
+\subsection{Cảnh báo và bảng so sánh}
+\label{sec:trace:portscan-alerts}
+
+\lstinputlisting[style=pseudo,
+    basicstyle=\ttfamily\scriptsize,
+    caption={Danh sách cảnh báo (\texttt{output/portscan/alerts.json})},
+    label={lst:portscan-alerts}]{\outputDir/portscan/alerts.json}
+
+\noindent Mảng JSON gồm ba bản ghi --- một cho mỗi thuật toán --- tất cả đều
+chỉ về cùng một IP \texttt{10.0.5.99}, cùng tần suất 41, cùng nhãn thời gian
+và cùng \texttt{event\_index = 141}. Trường \texttt{window\_id} là 0 vì đợt
+quét hoàn tất trong vòng 5\,ms nên nằm trọn trong cửa sổ tumbling đầu tiên
+(60\,s). Sự đồng thuận tuyệt đối giữa CMS, MG và HashMap chứng minh rằng
+trên luồng có $F_0$ nhỏ và phân biệt rõ heavy hitter, cả ba cấu trúc đều
+phát hiện được mà không có false positive nào. Tình huống \emph{khác biệt}
+chỉ bộc lộ khi $F_0$ tăng lớn --- khi đó HashMap mở rộng tuyến tính theo
+$F_0$ trong khi CMS giữ nguyên 80\,KB (xem Bảng~\ref{tab:throughput} ở
+Chương~\ref{ch:eval}).
+
+\lstinputlisting[style=pseudo,
+    basicstyle=\ttfamily\scriptsize,
+    caption={Bảng so sánh 3 thuật toán (\texttt{output/portscan/comparison.csv})},
+    label={lst:portscan-comparison}]{\outputDir/portscan/comparison.csv}
+
+\noindent CSV này là nguồn gốc cho Bảng~\ref{tab:portscan-comparison} ở
+Chương~\ref{ch:eval}. Đáng chú ý: với $F_0 = 11$ IP phân biệt, HashMap chỉ
+chiếm $\sim$0{,}40\,KB và MG $\sim$0{,}42\,KB, còn CMS giữ cố định
+$2048 \times 5 \times 8 = 81\,920$ byte $\approx 80$\,KB --- chi phí cố định
+mà CMS phải trả để có được tính chất \emph{mergeable} và \emph{độc lập với
+$F_0$}, hai tính chất quyết định ở quy mô vận hành thật.
+
+\subsection{Trace nội bộ của ba bộ ước lượng}
+\label{sec:trace:portscan-internal}
+
+Ba listing dưới đây là \emph{cốt lõi} của phụ lục --- cho thấy chính xác
+trạng thái nội tại của từng cấu trúc dữ liệu tại các mốc sự kiện
+50, 100, 110, 120, 130, 140 (trước attack, đầu attack, giữa attack, ngay
+trước alert).
+
+\lstinputlisting[style=pseudo,
+    basicstyle=\ttfamily\scriptsize,
+    caption={Trace CMS trên luồng port-scan (\texttt{output/portscan/trace\_cms.txt})},
+    label={lst:portscan-trace-cms-full}]{\outputDir/portscan/trace_cms.txt}
+
+\noindent CMS trace in cấu hình $w \times d$, dung lượng bộ nhớ và watchlist
+gồm 8 IP đại diện (attacker + 7 nguồn nền). Chú ý cột \texttt{est} của
+\texttt{10.0.5.99}: $0 \to 0 \to 10 \to 20 \to 30 \to 40$ tăng tuyến tính
+sau khi attacker bắt đầu phát SYN ở sự kiện 100. Các nguồn nền giữ ổn định
+quanh mốc 10--19 --- không có hiện tượng va chạm CMS làm vỡ ước lượng vì
+xác suất va chạm $1/w = 1/2048$ rất nhỏ so với $F_0 = 11$.
+
+\lstinputlisting[style=pseudo,
+    basicstyle=\ttfamily\scriptsize,
+    caption={Trace Misra--Gries trên luồng port-scan (\texttt{output/portscan/trace\_mg.txt})},
+    label={lst:portscan-trace-mg-full}]{\outputDir/portscan/trace_mg.txt}
+
+\noindent MG trace bổ sung mục \texttt{top slots} liệt kê tối đa 8 slot có
+counter cao nhất (đã giải mã ngược 4 byte little-endian thành dạng IPv4).
+Quan sát: với $k = 64$ slot mà chỉ có 11 IP phân biệt, không xảy ra
+\emph{decrement-all}, do đó counter của attacker bằng đúng tần suất thật
+$f = 41$. Nếu $k$ giảm xuống dưới $F_0$, decrement-all sẽ bắt đầu xảy ra,
+counter MG sẽ là \emph{ước lượng thiếu} so với HashMap, và alert có thể trễ
+hơn hoặc bỏ sót.
+
+\lstinputlisting[style=pseudo,
+    basicstyle=\ttfamily\scriptsize,
+    caption={Trace HashMap trên luồng port-scan (\texttt{output/portscan/trace\_hashmap.txt})},
+    label={lst:portscan-trace-hashmap-full}]{\outputDir/portscan/trace_hashmap.txt}
+
+\noindent HashMap là baseline chính xác --- counter trong watchlist trùng
+đúng với tần suất thật của từng IP trong cửa sổ. So khớp ba trace ta thấy:
+trên luồng nhỏ thuần khiết này, cả ba thuật toán cho cùng một con số tại
+mọi mốc, sự khác biệt chỉ thể hiện ở \emph{chi phí} (bộ nhớ và thông lượng,
+xem Mục~\ref{sec:trace:portscan-alerts}).
+
+\section{Output đo hiệu năng và dữ liệu trực quan hóa}
+\label{sec:trace:bench-output}
+
+Kết quả đo hiệu năng và dữ liệu dùng để vẽ biểu đồ được sinh bởi
+\texttt{scripts/plot\_bench.py}. Các file \texttt{.csv} được nhúng thành
+bảng trong Chương~\ref{ch:eval}; các file \texttt{.dat} là đầu vào trực tiếp
+cho gói \texttt{pgfplots} nếu cần vẽ lại biểu đồ.
+
+\lstinputlisting[style=pseudo,
+    basicstyle=\ttfamily\scriptsize,
+    caption={Thông lượng và bộ nhớ (\texttt{output/bench/throughput.csv})},
+    label={lst:bench-throughput-csv}]{\outputDir/bench/throughput.csv}
+
+\noindent Mỗi dòng là kết quả của một benchmark Google Benchmark, gồm tên
+benchmark (CMS với $w$ khác nhau, HashMap, hoặc estimate), số iter, thời gian
+trung bình mỗi op (ns), thông lượng (ops/s) và bộ nhớ thực
+(\texttt{memory\_bytes}). Đây là nguồn gốc của Bảng~\ref{tab:throughput} ở
+Chương~\ref{ch:eval}.
+
+\lstinputlisting[style=pseudo,
+    basicstyle=\ttfamily\scriptsize,
+    caption={Sai số CMS theo chiều rộng (\texttt{output/bench/error\_rate.csv})},
+    label={lst:bench-error-csv}]{\outputDir/bench/error_rate.csv}
+
+\noindent CSV này gồm năm cột: chiều rộng $w$, $\varepsilon \approx e/w$, cận
+lý thuyết $\varepsilon m$, sai số tuyệt đối đo được trên $10^5$ khoá, và tỉ lệ
+\textit{đo / cận}. Tỉ lệ ổn định $28$--$35\%$ qua mọi $w$ là minh chứng thực
+nghiệm cho việc bất đẳng thức Markov dùng trong chứng minh CMS là lỏng.
+
+\lstinputlisting[style=pseudo,
+    basicstyle=\ttfamily\scriptsize,
+    caption={Dữ liệu vẽ throughput (\texttt{output/bench/throughput.dat})},
+    label={lst:bench-throughput-dat}]{\outputDir/bench/throughput.dat}
+
+\lstinputlisting[style=pseudo,
+    basicstyle=\ttfamily\scriptsize,
+    caption={Dữ liệu vẽ sai số (\texttt{output/bench/error\_rate.dat})},
+    label={lst:bench-error-dat}]{\outputDir/bench/error_rate.dat}
+
+\noindent Hai file \texttt{.dat} là format đơn giản dạng \emph{x y} (cách
+nhau bằng tab), tương thích trực tiếp với \texttt{\textbackslash addplot
+table\{...\}} của \texttt{pgfplots} --- người đọc có thể tái tạo
+Hình~\ref{fig:bench-throughput} và Hình~\ref{fig:bench-error} ở
+Chương~\ref{ch:impl} chỉ bằng cách trỏ \texttt{\textbackslash input} tới
+hai file này.
+
+\lstinputlisting[style=pseudo,
+    basicstyle=\ttfamily\scriptsize,
+    caption={Kết quả đo hiệu năng thô (\texttt{output/bench/bench\_raw.json})},
+    label={lst:bench-raw-json}]{\outputDir/bench/bench_raw.json}
+
+\noindent JSON output gốc của Google Benchmark, gồm metadata máy đo
+(CPU, kernel, build type) và mảng \texttt{benchmarks} với toàn bộ trường gốc
+(real\_time, cpu\_time, items\_per\_second, custom counters). File này được
+giữ nguyên để đảm bảo \emph{tính tái lập} --- bất kỳ ai cũng có thể chạy lại
+\texttt{bench\_frequency} trên máy mình rồi diff để xem khác biệt phần cứng
+ảnh hưởng tới throughput thế nào.

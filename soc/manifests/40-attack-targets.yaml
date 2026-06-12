@@ -1,0 +1,81 @@
+# 6 victim pods spread across the cluster — they expose port 80, 8080, 5432.
+# An attacker pod will scan their cluster IPs to trigger real port-scan alerts.
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: zt-targets
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web
+  namespace: zt-targets
+  labels: { app: web }
+spec:
+  replicas: 3
+  selector: { matchLabels: { app: web } }
+  template:
+    metadata:
+      labels: { app: web }
+    spec:
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector: { matchLabels: { app: web } }
+      containers:
+        - name: nginx
+          image: nginx:1.27-alpine
+          ports:
+            - { containerPort: 80, name: http }
+          resources:
+            requests: { cpu: 10m, memory: 16Mi }
+            limits:   { cpu: 100m, memory: 64Mi }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api
+  namespace: zt-targets
+  labels: { app: api }
+spec:
+  replicas: 3
+  selector: { matchLabels: { app: api } }
+  template:
+    metadata:
+      labels: { app: api }
+    spec:
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector: { matchLabels: { app: api } }
+      containers:
+        - name: echo
+          image: ealen/echo-server:0.9.2
+          env:
+            - { name: PORT, value: "8080" }
+          ports:
+            - { containerPort: 8080, name: http }
+          resources:
+            requests: { cpu: 10m, memory: 16Mi }
+            limits:   { cpu: 100m, memory: 64Mi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: web
+  namespace: zt-targets
+spec:
+  selector: { app: web }
+  ports: [ { port: 80, targetPort: 80, name: http } ]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: api
+  namespace: zt-targets
+spec:
+  selector: { app: api }
+  ports: [ { port: 8080, targetPort: 8080, name: http } ]

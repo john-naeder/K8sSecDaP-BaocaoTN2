@@ -1,0 +1,17 @@
+===============================================================
+  COMPARISON  —  Exact vs CMS vs Misra-Gries on the same stream
+===============================================================
+CMS(width=4, depth=2)   MisraGries(k=3)
+
+Stream S = [ a, b, a, c, a, b, d, a ]
+Length m = 8
+
+    key        exact     CMS        MG CMS >= exact? MG <= exact?
+    "a"            4       6         2           yes           yes
+    "b"            2       2         0           yes           yes
+    "c"            1       1         0           yes           yes
+    "d"            1       6         0           yes           yes
+    "e"            0       0         0           yes           yes
+
+Conclusion: CMS overestimates, Misra-Gries underestimates —
+            the two algorithms bracket the true frequency.

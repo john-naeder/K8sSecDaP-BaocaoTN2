@@ -1,0 +1,27 @@
+# GKE add-on cluster — TEMPLATE ONLY. The ApplicationSet generator picks
+# up only files named exactly `config.yaml`, so leave the `.example`
+# suffix until ready to activate.
+#
+# Activation:
+#   1. argocd cluster add gke-bc2 --kubeconfig ~/.kube/gke-bc2.yaml
+#   2. cp config.yaml.example config.yaml
+#   3. Edit `cluster.server` to the GKE API endpoint (output of
+#      `gcloud container clusters describe <name> --format='value(endpoint)'`)
+#   4. git commit + push — ApplicationSet auto-creates the root Application.
+#
+# `rootPath` can point at `platform/argocd/apps-gke/` if GKE needs
+# overlays (e.g. storageClass=standard-rwo). For now reuse main `apps/`.
+cluster:
+  name: bc2-gke
+  server: https://REPLACE_WITH_GKE_API_SERVER
+  rootPath: platform/argocd/apps
+
+platform:
+  provider: gcp
+  ingressClass: gce
+  storageClass: standard-rwo
+  exposure: loadbalancer
+  cni: calico                  # GKE supports Calico via dataplane v2
+
+workloads:
+  overlay: gke

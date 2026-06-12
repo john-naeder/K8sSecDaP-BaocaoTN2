@@ -1,0 +1,632 @@
+% ============================================================================
+% Chuong 2: CO SO LY THUYET VA CONG NGHE
+% ============================================================================
+
+\chapter{CƠ SỞ LÝ THUYẾT VÀ CÔNG NGHỆ}
+\label{ch:foundations}
+
+% Logo cong nghe: moi logo MOT hinh rieng co caption, rong >= 1/5 trang.
+\newcommand{\techlogo}[3]{% #1=file #2=caption #3=label
+  \begin{figure}[H]
+    \centering
+    \includegraphics[width=0.22\linewidth]{../shared/figures/logos/#1}
+    \caption{#2}
+    \label{#3}
+  \end{figure}}
+
+Chương này trình bày cơ sở lý thuyết của các giải thuật cốt lõi và các công nghệ nền
+tảng được sử dụng trong đồ án. Bối cảnh kiến trúc (sự dịch chuyển từ một khối sang vi
+dịch vụ), các mẫu tấn công cần phát hiện và lý do chọn quan sát ở tầng nhân đã được
+trình bày ở Chương~\ref{ch:overview}; chương này tập trung đi sâu vào \emph{cách} hiện
+thực. Bám sát đúng đường đi của một sự kiện trong hệ thống, chương lần lượt làm rõ: cơ
+chế thu thập ở tầng nhân bằng eBPF (Mục~\ref{sec:theory-ebpf}), ước lượng tần suất bằng
+Count-Min Sketch để phát hiện quét cổng (Mục~\ref{sec:theory-cms}), phân tích đồ thị và
+phân loại địa chỉ (Mục~\ref{sec:graph-ip}), và cuối cùng là nền tảng công nghệ triển
+khai (Mục~\ref{sec:tech-stack}).
+
+\section{Thu thập sự kiện ở tầng nhân bằng eBPF}
+\label{sec:theory-ebpf}
+
+\subsection{eBPF và mô hình thực thi an toàn trong nhân Linux}
+
+\techlogo{ebpf.png}{Logo eBPF.}{fig:logo-ebpf}
+eBPF (\textit{extended Berkeley Packet Filter}) là một máy ảo nhỏ chạy ngay bên
+trong nhân Linux, cho phép nạp và thực thi các chương trình do người dùng cung
+cấp tại nhiều điểm móc (\textit{hook}) của nhân mà không cần biên dịch lại nhân
+hay nạp mô-đun nhân \cite{gregg2019bpf}. Điểm mấu chốt khiến eBPF phù hợp cho bài
+toán giám sát an ninh là cơ chế \textit{verifier}: trước khi một chương trình
+eBPF được nạp, bộ kiểm chứng của nhân phân tích tĩnh toàn bộ đồ thị luồng điều
+khiển để bảo đảm chương trình luôn kết thúc (không có vòng lặp vô hạn), không
+truy cập bộ nhớ ngoài phạm vi cho phép, và không thực hiện thao tác nguy hiểm.
+Sau khi vượt qua bộ kiểm chứng, chương trình được biên dịch tức thời (\textit{JIT})
+sang mã máy gốc nên chạy với hiệu năng gần như mã nhân biên dịch sẵn. So với việc
+viết một mô-đun nhân truyền thống --- vốn có thể làm sập (\textit{panic}) toàn bộ
+hệ điều hành nếu mắc lỗi và phải biên dịch lại theo từng phiên bản nhân --- eBPF
+mang lại sự an toàn và khả năng triển khai linh hoạt hơn hẳn, đây chính là lý do
+nó trở thành nền tảng cho phần lớn công cụ quan sát an ninh hiện đại trên
+Kubernetes. Hình~\ref{fig:ebpf-exec} tóm tắt vòng đời của một chương trình eBPF:
+mã C được biên dịch sang bytecode BPF bằng \texttt{clang/LLVM}, nạp vào nhân qua
+lời gọi \texttt{bpf()}, đi qua bộ kiểm chứng (nếu không an toàn sẽ bị từ chối ngay),
+được JIT sang mã máy gốc, rồi gắn tại điểm móc và tương tác với các BPF map.
+
+\begin{figure}[H]
+  \centering
+  \resizebox{0.9\linewidth}{!}{\input{../shared/figures/ebpf-exec-model}}
+  \caption{Mô hình thực thi của một chương trình eBPF.}
+  \label{fig:ebpf-exec}
+\end{figure}
+
+Một chương trình eBPF trao đổi dữ liệu với không gian người dùng và lưu trạng thái
+qua các cấu trúc gọi là \textit{BPF map}. Bộ thu thập của đồ án dùng ba map, mỗi
+map một vai trò (Hình~\ref{fig:bpf-maps}). \texttt{cidr\_map} kiểu
+\texttt{BPF\_MAP\_TYPE\_LPM\_TRIE} phân loại địa chỉ IP theo dải mạng (CIDR) ngay
+trong nhân theo nguyên tắc khớp tiền tố dài nhất (Mục~\ref{sec:graph-ip}), nhờ đó
+lọc bỏ sớm những kết nối không thuộc mạng pod, giảm tải cho tầng người dùng.
+\texttt{events} kiểu \texttt{BPF\_MAP\_TYPE\_RINGBUF} là bộ đệm vòng đa nhà sản
+xuất, một nhà tiêu thụ, dùng để chuyển sự kiện từ nhân lên không gian người dùng;
+so với \textit{perf buffer} thế hệ trước (cấp phát bộ đệm theo từng CPU và dễ mất
+thứ tự sự kiện giữa các CPU), ring buffer bảo toàn thứ tự toàn cục và dùng bộ nhớ
+hiệu quả hơn, phù hợp cho luồng kết nối mật độ cao. Cuối cùng, \texttt{sock\_store}
+kiểu \texttt{BPF\_MAP\_TYPE\_HASH} giữ con trỏ \texttt{sock} mà chương trình lưu
+lúc vào hàm để đọc lại lúc hàm trả về --- chi tiết kỹ thuật cần thiết sẽ được làm
+rõ ngay sau đây.
+
+\begin{figure}[H]
+  \centering
+  \resizebox{0.98\linewidth}{!}{\input{../shared/figures/bpf-maps}}
+  \caption{Ba BPF map của bộ thu thập và vai trò tương ứng.}
+  \label{fig:bpf-maps}
+\end{figure}
+
+\subsection{Lựa chọn điểm móc và tính khả chuyển nhờ CO-RE}
+
+Nhân Linux cho phép gắn chương trình eBPF tại nhiều tầng khác nhau, mỗi tầng có
+sự đánh đổi riêng. \texttt{XDP} và \texttt{tc} hoạt động rất sớm ở tầng trình điều
+khiển mạng, lý tưởng cho việc lọc/loại bỏ gói với thông lượng lớn nhưng chỉ thấy
+gói thô, khó truy được ngữ cảnh tiến trình. \textit{Tracepoint} là các điểm móc
+tĩnh do nhân định nghĩa sẵn, ổn định nhưng kém linh hoạt. \textit{kprobe} là điểm
+móc động cho phép chèn vào gần như bất kỳ hàm nào của nhân. Đồ án chọn gắn
+\texttt{kprobe} (và \texttt{kretprobe} tương ứng) vào hàm \texttt{tcp\_v4\_connect}
+--- hàm được nhân gọi mỗi khi một tiến trình khởi tạo kết nối TCP/IPv4 qua lời gọi
+\texttt{connect()}. Tại điểm này, chương trình đọc được đầy đủ địa chỉ nguồn,
+địa chỉ đích, cổng đích và mã tiến trình, vốn là toàn bộ thông tin cần thiết để
+phát hiện hành vi quét cổng và dịch chuyển ngang. Mô hình quan sát ở đây mang
+tính nền tảng: vì mọi kết nối TCP của mọi pod trên một nút đều phải đi qua nhân
+của nút đó, một chương trình eBPF đặt tại \texttt{tcp\_v4\_connect} sẽ quan sát
+được trọn vẹn lưu lượng kết nối mà không cần cài đặt tác nhân vào từng container.
+Hình~\ref{fig:kprobe-stack} cho thấy vị trí của hai điểm móc trên đường gọi hàm
+nhân, còn Bảng~\ref{tab:hook-compare} đối chiếu các lựa chọn điểm móc.
+
+\begin{figure}[H]
+  \centering
+  \resizebox{0.9\linewidth}{!}{\input{../shared/figures/kprobe-tcp-stack}}
+  \caption{Vị trí gắn \texttt{kprobe}/\texttt{kretprobe} trong ngăn xếp TCP.}
+  \label{fig:kprobe-stack}
+\end{figure}
+
+\begin{table}[H]
+  \centering
+  \caption{So sánh các điểm móc eBPF cho bài toán quan sát kết nối.}
+  \label{tab:hook-compare}
+  \small
+  \begin{tabularx}{\linewidth}{@{}l l X@{}}
+    \toprule
+    \textbf{Điểm móc} & \textbf{Tầng} & \textbf{Đặc điểm / phù hợp} \\
+    \midrule
+    XDP / tc        & Trình điều khiển / hàng đợi & Rất sớm, thông lượng cao, nhưng chỉ thấy gói thô, khó truy ngữ cảnh tiến trình \\
+    tracepoint      & Điểm tĩnh của nhân          & Ổn định theo phiên bản nhưng cố định, kém linh hoạt \\
+    \textbf{kprobe} & \textbf{Hàm nhân (động)}    & \textbf{Gắn được vào \texttt{tcp\_v4\_connect}; đọc đủ src/dst/port/pid --- lựa chọn của đồ án} \\
+    \bottomrule
+  \end{tabularx}
+\end{table}
+
+Cơ chế thu thập được tách làm hai nửa vì lý do kỹ thuật: tại thời điểm \emph{vào}
+hàm (\texttt{kprobe}), địa chỉ đích chưa chắc đã được điền đầy đủ vào cấu trúc
+\texttt{sock}, nên chương trình chỉ lưu con trỏ \texttt{sock} theo khóa
+\texttt{pid\_tgid} vào \texttt{sock\_store}; tại thời điểm \emph{trả về}
+(\texttt{kretprobe}), chương trình đọc lại con trỏ này, trích ra địa chỉ nguồn,
+địa chỉ đích và cổng đích, tra \texttt{cidr\_map} để xác định nhãn vùng mạng, và
+chỉ khi nguồn thuộc mạng pod (\texttt{src\_label} $= 1$) mới cấp một ô trong
+\texttt{events} (ring buffer) để điền cấu trúc \texttt{network\_event\_t} gồm
+\{\texttt{src\_ip}, \texttt{dst\_ip}, \texttt{dst\_port}, \texttt{pid},
+\texttt{timestamp\_ns}\} rồi đẩy lên không gian người dùng. Bộ lọc theo nhãn ngay
+trong nhân này loại bỏ phần lớn lưu lượng không liên quan tại nguồn, giảm tải đáng
+kể cho tầng phân tích. Hình~\ref{fig:packet-path} mô tả toàn bộ đường đi của một
+sự kiện từ lời gọi \texttt{connect()} trong pod tới khi tới được bộ máy pipeline.
+
+\begin{figure}[H]
+  \centering
+  \resizebox{0.6\linewidth}{!}{\input{../shared/figures/packet-event-path}}
+  \caption{Đường đi của một sự kiện kết nối qua eBPF.}
+  \label{fig:packet-path}
+\end{figure}
+
+Để một chương trình eBPF biên dịch một lần có thể chạy trên nhiều phiên bản nhân
+khác nhau, đồ án dựa vào cơ chế CO-RE (\textit{Compile Once -- Run Everywhere})
+kết hợp với thông tin kiểu BTF (\textit{BPF Type Format}) mà nhân hiện đại đính
+kèm. Thay vì giả định bố cục bộ nhớ của các cấu trúc nhân tại thời điểm biên dịch
+(điều buộc phải có header trùng khít với từng nút), chương trình truy cập trường
+dữ liệu thông qua các phép định vị lại (\textit{relocation}) được giải tại thời
+điểm nạp dựa trên BTF của nhân đích. Nhờ đó cùng một tệp đối tượng eBPF chạy được
+trên cụm có nhân không đồng nhất, giảm đáng kể chi phí vận hành. Cuối cùng, cần
+ghi nhận một giới hạn vốn có của lựa chọn điểm móc này: vì \texttt{kprobe} trên
+\texttt{tcp\_v4\_connect} chỉ kích hoạt khi có lời gọi \texttt{connect()}, các
+kiểu quét gửi gói SYN thô (ví dụ \texttt{nmap -sS} chạy với quyền root) sẽ không
+đi qua đường này và do đó không bị quan sát; phân tích định lượng về giới hạn này
+được trình bày ở Chương~\ref{ch:eval}.
+
+\section{Ước lượng tần suất trên luồng: Count-Min Sketch}
+\label{sec:theory-cms}
+
+Bài toán cốt lõi mà tầng phát hiện phải giải là: trên một luồng sự kiện kết nối
+gần như vô hạn và tốc độ cao, ước lượng \emph{tần suất xuất hiện} của mỗi địa chỉ
+nguồn để nhận ra nguồn nào đang tạo ra số lượng kết nối bất thường. Lưu trữ chính
+xác tần suất bằng bảng băm đòi hỏi bộ nhớ tỉ lệ thuận với số phần tử phân biệt ---
+không khả thi khi số địa chỉ và cổng có thể rất lớn và biến động liên tục. Count-Min
+Sketch (CMS) \cite{cormode2005cms} giải quyết vấn đề này bằng một cấu trúc xác suất
+sử dụng bộ nhớ dưới tuyến tính, đánh đổi một sai số ước lượng có thể kiểm soát được
+để lấy bộ nhớ cố định và thời gian cập nhật/truy vấn hằng số.
+
+Về cấu trúc, CMS là một ma trận đếm kích thước $d \times w$ đi kèm $d$ hàm băm độc
+lập đôi một, mỗi hàm ánh xạ một khóa vào một trong $w$ cột (đồ án dùng họ hàm băm
+phi mật mã MurmurHash \cite{appleby2011murmur} vì tốc độ cao và phân bố tốt). Thao
+tác \texttt{record(x)} tăng một đơn vị tại $d$ ô $(\,i, h_i(x)\,)$ với mọi hàng $i$;
+thao tác \texttt{estimate(x)} trả về \emph{giá trị nhỏ nhất} trong $d$ ô đó. Tính
+chất nền tảng của cấu trúc là nó \emph{không bao giờ ước lượng thiếu}: do va chạm
+băm chỉ có thể làm các ô bị cộng thêm, ta luôn có $\hat{f}(x) \ge f(x)$. Mặt khác,
+sai số vượt lên trên bị chặn theo xác suất: với chiều rộng $w = \lceil e/\varepsilon \rceil$
+và chiều sâu $d = \lceil \ln(1/\delta) \rceil$, ước lượng thỏa mãn
+$\hat{f}(x) \le f(x) + \varepsilon \lVert \mathbf{f} \rVert_1$ với xác suất ít nhất
+$1-\delta$. Phát biểu và chứng minh đầy đủ của cận này, cùng phân tích so sánh với
+Misra--Gries và Count Sketch, đã được trình bày trong Báo cáo học phần CNPM~1 nên ở
+đây chỉ nêu lại kết quả phục vụ phần thiết kế. Hình~\ref{fig:cms} minh họa trực quan
+cấu trúc, còn Giải thuật~\ref{alg:cms} tóm tắt hai thao tác cơ bản.
+
+\begin{figure}[H]
+  \centering
+  \resizebox{0.8\linewidth}{!}{\input{../shared/figures/cms-structure}}
+  \caption{Cấu trúc Count-Min Sketch.}
+  \label{fig:cms}
+\end{figure}
+
+\begin{algorithm}[H]
+\caption{Count-Min Sketch --- cập nhật và truy vấn}
+\label{alg:cms}
+\begin{algorithmic}[1]
+\Function{Record}{$x$}
+  \For{$i \gets 1$ \textbf{to} $d$}
+    \State $C[i]\big[\,h_i(x) \bmod w\,\big] \gets C[i]\big[\,h_i(x) \bmod w\,\big] + 1$
+  \EndFor
+\EndFunction
+\Function{Estimate}{$x$}
+  \State \Return $\min_{1 \le i \le d} \; C[i]\big[\,h_i(x) \bmod w\,\big]$
+\EndFunction
+\end{algorithmic}
+\end{algorithm}
+
+Để thấy rõ cơ chế, Bảng~\ref{tab:cms-trace} minh hoạ trạng thái ma trận sau một
+luồng ngắn chạy tay.
+
+\begin{table}[H]
+  \centering
+  \caption{Trạng thái ma trận CMS ($d=2$, $w=4$) sau luồng $S=(a,b,a,c,a,b)$, với
+           $h_1{:}\;a{\to}1, b{\to}3, c{\to}1$ và $h_2{:}\;a{\to}2, b{\to}0, c{\to}3$.}
+  \label{tab:cms-trace}
+  \small
+  \begin{tabular}{@{}l cccc@{}}
+    \toprule
+    & cột 0 & cột 1 & cột 2 & cột 3 \\
+    \midrule
+    hàng $h_1$ & 0 & 4 & 0 & 2 \\
+    hàng $h_2$ & 2 & 0 & 3 & 1 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\noindent Khi đó $\hat f(a)=\min\big(C[1][1], C[2][2]\big)=\min(4,3)=3=f(a)$ (chính
+xác), và $\hat f(c)=\min\big(C[1][1], C[2][3]\big)=\min(4,1)=1=f(c)$: dù ô $C[1][1]$
+bị va chạm giữa $a$ và $c$ (giá trị 4), phép lấy nhỏ nhất vẫn cho ước lượng đúng nhờ
+hàng còn lại --- đây chính là trực giác đằng sau tính chất không-ước-lượng-thiếu.
+
+Trong hệ thống của đồ án, CMS được dùng với khóa là \emph{địa chỉ IP nguồn}: mỗi sự
+kiện kết nối làm tăng bộ đếm của địa chỉ nguồn tương ứng, và khi giá trị ước lượng
+của một nguồn vượt một ngưỡng định trước trong một cửa sổ thời gian, hệ thống phát
+một cảnh báo \texttt{port\_scan}. Cấu hình thực tế dùng ma trận $5 \times 2048$ với
+ngưỡng $40$ trên cửa sổ trượt kiểu \textit{tumbling} dài $60$ giây. Cần nhấn mạnh
+một đặc điểm thiết kế có hệ quả đến độ chính xác: bộ đếm khóa theo địa chỉ nguồn nên
+nó đếm \emph{tổng lưu lượng kết nối} của nguồn đó, chứ không đếm \emph{số cổng đích
+phân biệt}. Lựa chọn này khiến bộ phát hiện thực chất là một bộ phát hiện theo tốc
+độ kết nối; ưu, nhược điểm và các hệ quả định lượng của nó (bỏ sót khi quét chậm,
+báo giả khi một client hợp lệ tạo nhiều kết nối) được phân tích kỹ ở
+Chương~\ref{ch:eval}.
+
+\section{Phân tích đồ thị và phân loại địa chỉ trong mạng nội cụm}
+\label{sec:graph-ip}
+\label{ch:other-dsa}
+
+Ngoài việc đếm tần suất từng nguồn riêng lẻ, hệ thống còn dựng một \emph{đồ thị
+truyền thông} trong đó mỗi đỉnh là một địa chỉ và mỗi cung biểu diễn một kết nối đã
+quan sát được. Trên đồ thị này, hai bài toán đồ thị kinh điển được vận dụng để phát
+hiện những mẫu hành vi mà phép đếm tần suất đơn lẻ không nhìn thấy, kèm theo một bài
+toán phân loại địa chỉ phục vụ cho cả tầng nhân lẫn tầng phân tích.
+
+\subsection{Tarjan --- phát hiện thành phần liên thông mạnh}
+
+Một thành phần liên thông mạnh (\textit{Strongly Connected Component}, SCC) của đồ
+thị có hướng là một tập đỉnh cực đại trong đó mọi cặp đỉnh đều có thể đến được nhau.
+Trong ngữ cảnh an ninh nội cụm, một SCC không tầm thường (kích thước lớn hơn một)
+giữa các pod là một dấu hiệu đáng ngờ: nó cho thấy một nhóm pod đang liên lạc vòng
+tròn lẫn nhau, mẫu hình thường gặp ở các mạng điều khiển (\textit{command-and-control})
+hoặc ở giai đoạn dịch chuyển ngang khi kẻ tấn công đã kiểm soát nhiều điểm. Đồ án sử
+dụng giải thuật Tarjan \cite{tarjan1972depth} để liệt kê toàn bộ SCC trong một lần
+duyệt theo chiều sâu (DFS): mỗi đỉnh được gán một chỉ số khám phá và một giá trị
+\textit{low-link} --- chỉ số nhỏ nhất có thể quay về được qua các cung ngược --- đồng
+thời được đẩy vào một ngăn xếp; khi một đỉnh có low-link bằng chính chỉ số khám phá
+của nó, toàn bộ các đỉnh phía trên nó trong ngăn xếp tạo thành một SCC. Giải thuật
+chạy trong thời gian tuyến tính $O(V+E)$ theo số đỉnh và số cung, đủ nhanh để chạy
+định kỳ trên đồ thị truyền thông đang lớn dần của cụm. Giải thuật~\ref{alg:tarjan}
+trình bày ý tưởng cốt lõi của một lần duyệt.
+
+\begin{algorithm}[H]
+\caption{Tarjan --- liệt kê thành phần liên thông mạnh}
+\label{alg:tarjan}
+\begin{algorithmic}[1]
+\State $index \gets 0$;\quad ngăn xếp $S \gets \varnothing$
+\Function{StrongConnect}{$v$}
+  \State $v.index \gets index$;\; $v.low \gets index$;\; $index \gets index + 1$
+  \State đẩy $v$ vào $S$;\; $v.onStack \gets \mathbf{true}$
+  \ForAll{cung $(v, w)$}
+    \If{$w$ chưa được thăm}
+      \State \Call{StrongConnect}{$w$};\; $v.low \gets \min(v.low,\, w.low)$
+    \ElsIf{$w.onStack$}
+      \State $v.low \gets \min(v.low,\, w.index)$
+    \EndIf
+  \EndFor
+  \If{$v.low = v.index$}
+    \State lấy các đỉnh khỏi $S$ cho tới $v$ $\;\Rightarrow\;$ một thành phần liên thông mạnh
+  \EndIf
+\EndFunction
+\end{algorithmic}
+\end{algorithm}
+
+\begin{figure}[H]
+  \centering
+  \resizebox{0.62\linewidth}{!}{\input{../shared/figures/tarjan-example}}
+  \caption{Ví dụ thành phần liên thông mạnh (SCC) trong đồ thị truyền thông.}
+  \label{fig:tarjan-ex}
+\end{figure}
+
+\subsection{BFS --- bán kính ảnh hưởng theo $k$ bước}
+
+Khi một pod bị nghi ngờ đã bị chiếm, một câu hỏi vận hành quan trọng là: từ pod đó,
+kẻ tấn công có thể với tới những đâu trong một số bước giới hạn? Hình thức hóa, ta cần
+tính tập khả-đạt-$k$-bước $R_k(s) = \{\, v : \text{tồn tại đường đi từ } s \text{ tới }
+v \text{ với độ dài} \le k \,\}$. Vì đồ thị truyền thông không trọng số và ta quan
+tâm tới khoảng cách theo số bước, duyệt theo chiều rộng (BFS) là lựa chọn tự nhiên và
+tối ưu: BFS mở rộng đồ thị theo từng lớp khoảng cách tăng dần, nên chỉ cần dừng ở lớp
+thứ $k$ là thu được toàn bộ tập khả-đạt mong muốn trong thời gian $O(V+E)$
+\cite{cormen2009algorithms}. Kích thước của $R_k(s)$ chính là \emph{bán kính ảnh
+hưởng} (\textit{blast radius}) của nguồn $s$ --- một chỉ số trực quan giúp người vận
+hành ưu tiên xử lý: một nguồn vừa vượt ngưỡng quét cổng lại vừa có bán kính ảnh hưởng
+lớn là sự cố cần can thiệp khẩn cấp. Hệ thống sử dụng $k = 3$ bước trong cấu hình mặc
+định; Giải thuật~\ref{alg:bfs} mô tả phép duyệt theo lớp có giới hạn độ sâu.
+
+\begin{algorithm}[H]
+\caption{BFS giới hạn $k$ bước --- bán kính ảnh hưởng $R_k(s)$}
+\label{alg:bfs}
+\begin{algorithmic}[1]
+\State $R \gets \{s\}$;\quad hàng đợi $Q \gets \big[(s, 0)\big]$
+\While{$Q \neq \varnothing$}
+  \State $(u, d) \gets$ lấy đầu hàng đợi $Q$
+  \If{$d = k$} \State \textbf{bỏ qua}, xét phần tử kế tiếp \EndIf
+  \ForAll{láng giềng $v$ của $u$}
+    \If{$v \notin R$}
+      \State $R \gets R \cup \{v\}$;\; thêm $(v, d{+}1)$ vào $Q$
+    \EndIf
+  \EndFor
+\EndWhile
+\State \Return $R$
+\end{algorithmic}
+\end{algorithm}
+
+\begin{figure}[H]
+  \centering
+  \resizebox{0.72\linewidth}{!}{\input{../shared/figures/bfs-layers}}
+  \caption{Bán kính ảnh hưởng theo BFS $k$ bước từ nguồn $s$.}
+  \label{fig:bfs-ex}
+\end{figure}
+
+\subsection{LPM Trie --- phân loại địa chỉ theo tiền tố dài nhất}
+
+Cả tầng nhân lẫn tầng phân tích đều cần trả lời nhanh câu hỏi ``địa chỉ này thuộc
+vùng mạng nào'' để phân biệt lưu lượng nội bộ pod, lưu lượng dịch vụ, lưu lượng nút
+và lưu lượng bên ngoài. Đây chính là bài toán khớp tiền tố dài nhất
+(\textit{Longest Prefix Match}): cho một tập dải mạng CIDR có gán nhãn, hãy tìm dải
+\emph{cụ thể nhất} (tiền tố dài nhất) chứa một địa chỉ cho trước. LPM Trie giải bài
+toán này bằng một cây nhị phân theo bit của tiền tố: mỗi dải mạng được chèn dọc theo
+đường đi tương ứng với các bit tiền tố của nó kèm nhãn, còn thao tác tra cứu đi từ
+gốc theo các bit của địa chỉ và ghi nhớ nhãn tại nút khớp sâu nhất. So với cách băm
+toàn bộ địa chỉ (không biểu diễn được quan hệ bao hàm giữa các dải) hay cây Radix
+tổng quát, LPM Trie cho thời gian tra cứu chặn theo độ dài địa chỉ và biểu diễn tự
+nhiên thứ bậc bao hàm của các dải. Trong đồ án, cùng một bảng phân loại được dùng ở
+hai nơi: trong nhân qua \texttt{BPF\_MAP\_TYPE\_LPM\_TRIE} để lọc sớm, và trong
+pipeline qua bộ phân loại \texttt{ip\_classifier}. Bảng phân loại gán nhãn cho các
+dải tiêu biểu: \texttt{10.244.0.0/16} là mạng pod, \texttt{10.96.0.0/12} là mạng
+dịch vụ, \texttt{192.168.0.0/16} là mạng nút, và \texttt{0.0.0.0/0} là lưu lượng bên
+ngoài; nhờ đó mỗi sự kiện đều mang ngữ cảnh vùng mạng phục vụ cho việc lọc và phân
+tích về sau. Giải thuật~\ref{alg:lpm} mô tả thao tác tra cứu nhãn.
+
+\begin{algorithm}[H]
+\caption{LPM Trie --- tra cứu nhãn theo tiền tố dài nhất}
+\label{alg:lpm}
+\begin{algorithmic}[1]
+\Function{Lookup}{địa chỉ $a$}
+  \State $node \gets root$;\quad $label \gets \textsc{None}$
+  \ForAll{bit $b$ của $a$, từ cao xuống thấp}
+    \If{$node$ có gán nhãn} \State $label \gets node.label$ \EndIf
+    \If{$node.child[b]$ rỗng} \State \textbf{dừng vòng lặp} \EndIf
+    \State $node \gets node.child[b]$
+  \EndFor
+  \State \Return $label$ \Comment{nhãn của tiền tố khớp sâu nhất}
+\EndFunction
+\end{algorithmic}
+\end{algorithm}
+
+\begin{figure}[H]
+  \centering
+  \resizebox{0.96\linewidth}{!}{\input{../shared/figures/lpm-trie-example}}
+  \caption{Ví dụ phân loại CIDR bằng LPM-Trie.}
+  \label{fig:lpm-ex}
+\end{figure}
+
+Bốn giải thuật trên không hoạt động rời rạc mà phối hợp trên cùng một dòng xử lý sự
+kiện. Hình~\ref{fig:detect-flow} tóm tắt cách chúng kết hợp: mỗi sự kiện kết nối lần
+lượt được phân loại theo vùng địa chỉ (LPM Trie), được đếm tần suất theo nguồn (CMS)
+để kiểm tra ngưỡng quét cổng, đồng thời được dùng để bồi đắp đồ thị truyền thông ---
+nơi giải thuật Tarjan và phép duyệt BFS chạy để phát hiện chu trình khả nghi và ước
+lượng bán kính ảnh hưởng. Cách bố trí này cho phép phát hiện trực tuyến với chi phí
+thấp ngay khi sự kiện vừa được sinh ra.
+
+\begin{figure}[H]
+  \centering
+  \resizebox{0.62\linewidth}{!}{\input{../shared/figures/detect-flow}}
+  \caption{Lưu đồ xử lý một sự kiện kết nối qua bốn giải thuật cốt lõi.}
+  \label{fig:detect-flow}
+\end{figure}
+
+\section{Nền tảng công nghệ sử dụng}
+\label{sec:tech-stack}
+
+Một đặc trưng của đồ án là toàn bộ hệ thống được xây dựng trên một nền tảng
+(\textit{platform}) điện toán đám mây gốc (\textit{cloud-native}) thay vì chạy trực
+tiếp trên máy chủ vật lý theo cách truyền thống. Việc lựa chọn nền tảng này không chỉ
+là quyết định kỹ thuật phụ trợ mà còn quy định cách thức ứng dụng đặc thù của đồ án
+vận hành, do đó mục này trình bày chi tiết từng tầng nền tảng và kết lại bằng một sơ
+đồ tổng thể (Hình~\ref{fig:platform}) làm rõ điểm khác biệt so với các kiến trúc đi
+trước. Bảng~\ref{tab:tech} tóm tắt công dụng cụ thể của từng công cụ trong hệ thống.
+
+\begin{table}[H]
+  \centering
+  \caption{Các công cụ/công nghệ nền tảng và công dụng trong hệ thống.}
+  \label{tab:tech}
+  \small
+  \begin{tabularx}{\linewidth}{@{}l X@{}}
+    \toprule
+    \textbf{Công cụ} & \textbf{Công dụng trong hệ thống} \\
+    \midrule
+    Kubernetes              & Điều phối container: lập lịch, mở rộng, tự phục hồi; \texttt{DaemonSet} đặt bộ thu thập trên mọi nút \\
+    CNI Calico              & Mạng pod và \emph{thực thi} \texttt{NetworkPolicy} --- nền cho vòng phản hồi cách ly \\
+    containerd              & Runtime chạy container \\
+    Nhân Linux 6.8 + BTF    & Cung cấp eBPF và thông tin kiểu BTF cho CO-RE \\
+    eBPF / libbpf           & Thu thập sự kiện kết nối ở tầng nhân (kprobe \texttt{tcp\_v4\_connect}) \\
+    NATS JetStream          & Trục thông điệp xuất bản--đăng ký giữa pipeline và các dịch vụ SOC \\
+    PostgreSQL              & Lưu trữ bền vững sự cố, cảnh báo, hành động, nhật ký kiểm toán (ACID, JSONB) \\
+    Prometheus / Grafana    & Thu thập số liệu và trực quan hóa cho người vận hành \\
+    ArgoCD (GitOps)         & Đồng bộ trạng thái cụm về đúng khai báo trong Git (prune, self-heal) \\
+    Tekton                  & Tích hợp liên tục (CI) bằng pipeline chạy ngay trong cụm: xây, kiểm thử và đóng gói ảnh OCI \\
+    Harbor                  & Registry ảnh container riêng: lưu trữ, quét lỗ hổng và ký ảnh trước khi triển khai \\
+    clang/LLVM, bpftool     & Biên dịch chương trình eBPF, sinh \texttt{vmlinux.h}, thao tác BPF \\
+    \bottomrule
+  \end{tabularx}
+\end{table}
+
+Phần dưới đây trình bày từng công nghệ theo cùng một mạch: \emph{nó là gì}, \emph{đồ án
+dùng nó làm gì}, và \emph{vì sao chọn nó thay cho các giải pháp thay thế}. Các tầng nhân
+Linux, eBPF/libbpf và clang/LLVM/bpftool đã được phân tích sâu ở Mục~\ref{sec:theory-ebpf}
+nên không nhắc lại ở đây.
+
+\subsection{Kubernetes --- nền điều phối container}
+
+\techlogo{kubernetes.png}{Logo Kubernetes.}{fig:logo-k8s}
+Kubernetes là hệ điều phối (\textit{orchestrator}) container mã nguồn mở, khởi nguồn từ
+Google và hiện do CNCF quản trị; nó tự động hóa việc lập lịch, mở rộng, tự phục hồi và
+quản lý vòng đời của các container trên một cụm nhiều nút. Đơn vị triển khai nhỏ nhất là
+\textit{pod}, và mọi trạng thái mong muốn đều được mô tả \emph{khai báo} bằng tệp YAML.
+
+Trong đồ án, Kubernetes là nền chạy toàn bộ hệ thống: nó điều phối các dịch vụ SOC và
+pipeline phân tích như những \textit{Deployment} co giãn, đồng thời --- và đây là điểm
+mấu chốt --- dùng đối tượng \texttt{DaemonSet} để bảo đảm bộ thu thập eBPF chạy đúng
+\emph{một bản trên mỗi nút}, tự động theo cụm khi thêm/bớt nút. Nhờ vậy độ phủ quan sát
+tầng nhân là toàn cục mà không cần thao tác thủ công.
+
+Sở dĩ chọn Kubernetes thay cho các công cụ điều phối nhẹ hơn như Docker Compose hay Docker
+Swarm là vì hai lý do đặc thù của bài toán: thứ nhất, chỉ Kubernetes có nguyên hình
+\texttt{DaemonSet} đúng ngữ nghĩa ``một tiến trình nền trên mỗi nút'' mà mô hình thu thập
+yêu cầu; thứ hai, Kubernetes định nghĩa chuẩn \texttt{NetworkPolicy} --- nền tảng để khép
+kín vòng phản hồi cách ly ở Chương~\ref{ch:design}. Đây cũng là chuẩn thực tế của ngành,
+giúp đồ án bám sát môi trường triển khai thật.
+
+\subsection{CNI Calico --- mạng pod và thực thi NetworkPolicy}
+
+\techlogo{calico.png}{Logo Project Calico.}{fig:logo-calico}
+Calico là một trình cắm mạng (\textit{Container Network Interface}, CNI) cung cấp khả năng
+kết nối mạng giữa các pod và, quan trọng hơn, \emph{thực thi} chính sách mạng
+\texttt{NetworkPolicy}. Khác với một số CNI chỉ lo định tuyến gói, Calico hiện thực một bộ
+máy chính sách ở mỗi nút để cho phép hoặc chặn lưu lượng theo nhãn, không gian tên và dải
+địa chỉ.
+
+Vai trò của Calico trong đồ án nằm ở \emph{tầng phản hồi}: khi một nguồn bị xác định là
+đang quét cổng, hệ thống sinh ra một \texttt{NetworkPolicy} kiểu chặn lối ra
+(\textit{egress-deny}) và Calico là thành phần thực sự áp đặt việc chặn đó trong mạng nội
+cụm. Nói cách khác, Calico biến một quyết định phát hiện thành một hành động ngăn chặn cụ
+thể --- đúng tinh thần ``phát hiện đi đôi với phòng ngừa'' của tên đề tài.
+
+Calico được chọn vì nó hỗ trợ đầy đủ và ổn định \texttt{NetworkPolicy} (kể cả chính sách
+egress), trong khi một số CNI phổ biến như Flannel không thực thi chính sách mạng. So với
+Cilium --- một CNI dựa trên eBPF cũng rất mạnh --- Calico cho mô hình chính sách rõ ràng,
+tài liệu trưởng thành và đủ cho phạm vi đồ án, đồng thời tránh chồng lấn với phần eBPF do
+chính đồ án tự hiện thực ở tầng thu thập.
+
+\subsection{containerd --- runtime chạy container}
+
+\techlogo{containerd.png}{Logo containerd.}{fig:logo-containerd}
+containerd là runtime container (\textit{container runtime}) cấp thấp, một dự án CNCF,
+đảm nhiệm việc kéo ảnh, quản lý vòng đời và chạy container theo chuẩn OCI. Trong cụm, nó
+nằm ngay dưới Kubernetes và là nơi thực sự khởi chạy các container của mọi pod, bao gồm
+cả pod thu thập eBPF (vốn cần quyền đặc thù để truy cập tầng nhân). Đồ án dùng containerd
+vì đây là runtime mặc định, gọn nhẹ và được Kubernetes hỗ trợ trực tiếp qua giao diện CRI,
+không cần lớp trung gian như Docker Engine.
+
+\subsection{NATS JetStream --- trục thông điệp xuất bản/đăng ký}
+
+\techlogo{nats.png}{Logo NATS.}{fig:logo-nats}
+NATS là một hệ thống truyền thông điệp (\textit{messaging}) hiệu năng cao theo mô hình
+xuất bản--đăng ký (\textit{publish/subscribe}); JetStream là lớp bổ sung khả năng lưu trữ
+bền vững và phát lại thông điệp. Trong kiến trúc của đồ án, NATS JetStream là \emph{trục
+xương sống} nối tầng phân tích với các dịch vụ SOC: pipeline phát các cảnh báo lên các chủ
+đề (\textit{subject}), còn aggregator, alert-bridge và incident-service đăng ký nhận. Cách
+ghép nối lỏng này tách rời bên sinh sự kiện khỏi bên tiêu thụ, cho phép mở rộng hoặc thay
+thế từng dịch vụ độc lập. NATS được ưu tiên hơn Kafka hay RabbitMQ vì nhẹ, độ trễ thấp và
+chi phí vận hành nhỏ --- phù hợp với khối lượng cảnh báo của hệ thống mà không cần bộ máy
+nặng của Kafka.
+
+\subsection{PostgreSQL --- cơ sở dữ liệu quan hệ}
+
+\techlogo{postgresql.png}{Logo PostgreSQL.}{fig:logo-postgres}
+PostgreSQL là hệ quản trị cơ sở dữ liệu quan hệ mã nguồn mở, nổi tiếng về độ tin cậy và
+tuân thủ chuẩn. Đồ án dùng PostgreSQL làm kho lưu trữ bền vững cho sự cố
+(\textit{incident}), cảnh báo, hành động phản hồi và \emph{nhật ký kiểm toán}
+(\textit{audit log}) --- những dữ liệu đòi hỏi tính toàn vẹn cao. Hai đặc tính quyết định
+việc lựa chọn là: bảo đảm giao dịch ACID (cần thiết để nhật ký kiểm toán không bị mất hay
+mâu thuẫn) và kiểu dữ liệu \texttt{JSONB} cho phép lưu linh hoạt các trường ngữ cảnh bán
+cấu trúc (ví dụ thông tin pod đính kèm mỗi sự cố) mà vẫn truy vấn hiệu quả. So với các cơ
+sở dữ liệu tài liệu như MongoDB, PostgreSQL giữ được ràng buộc quan hệ giữa sự cố -- cảnh
+báo -- hành động; so với MySQL, nó hỗ trợ \texttt{JSONB} và chỉ mục biểu thức tốt hơn cho
+nhu cầu này.
+
+\subsection{Prometheus --- thu thập số liệu}
+
+\techlogo{prometheus.png}{Logo Prometheus.}{fig:logo-prometheus}
+Prometheus là hệ thu thập số liệu (\textit{metrics}) theo mô hình kéo (\textit{pull}) và
+lưu trữ dưới dạng chuỗi thời gian, một dự án CNCF. Định kỳ nó truy vấn các điểm cuối
+\texttt{/metrics} mà mỗi dịch vụ phơi ra và lưu lại theo thời gian. Trong đồ án, Prometheus
+thu thập số liệu về tốc độ sự kiện, độ trễ xử lý và sức khỏe các dịch vụ SOC; chính những
+số liệu này về sau được dùng làm dữ liệu \emph{đánh giá} định lượng ở Chương~\ref{ch:eval}.
+Prometheus được chọn vì là chuẩn thực tế cho giám sát trong hệ sinh thái cloud-native, tích
+hợp sẵn với Kubernetes và có mô hình truy vấn (PromQL) mạnh mà vẫn nhẹ.
+
+\subsection{Grafana --- trực quan hóa và bảng điều khiển}
+
+\techlogo{grafana.png}{Logo Grafana.}{fig:logo-grafana}
+Grafana là công cụ trực quan hóa dữ liệu thành các bảng điều khiển (\textit{dashboard})
+tương tác. Nó đọc số liệu từ Prometheus (và các nguồn khác) rồi hiển thị thành biểu đồ thời
+gian thực cho người vận hành. Trong hệ thống, Grafana là mặt giám sát trực quan: chuyên
+viên phân tích theo dõi tình hình cụm, tốc độ cảnh báo và sức khỏe dịch vụ qua các bảng do
+Grafana dựng. Grafana được chọn vì ghép cặp tự nhiên với Prometheus, hỗ trợ nhiều loại biểu
+đồ và phân quyền xem theo vai trò --- phù hợp với nhu cầu của một bảng điều khiển an ninh.
+
+\subsection{Docker --- đóng gói ảnh container}
+
+\techlogo{docker.png}{Logo Docker.}{fig:logo-docker}
+Docker là công cụ đóng gói ứng dụng cùng toàn bộ phụ thuộc thành một \emph{ảnh}
+(\textit{image}) bất biến theo chuẩn OCI, bảo đảm phần mềm chạy nhất quán giữa máy phát
+triển và cụm thật. Trong đồ án, mỗi thành phần (collector, pipeline, sáu dịch vụ SOC) được
+đóng gói thành một ảnh Docker riêng; tính bất biến của ảnh là nền tảng cho khả năng tái lập
+của hệ thống. Docker được chọn vì là định dạng đóng gói phổ biến nhất, tương thích trực
+tiếp với runtime \texttt{containerd} của cụm.
+
+\subsection{Tekton --- tích hợp liên tục gốc Kubernetes}
+
+\techlogo{tekton.png}{Logo Tekton.}{fig:logo-tekton}
+Tekton là khung tích hợp liên tục (CI) \emph{gốc Kubernetes}: mỗi bước xây dựng, kiểm thử
+và đóng gói ảnh được mô tả khai báo và chạy ngay trong cụm dưới dạng pod. Trong đồ án,
+Tekton đảm nhiệm việc tự động xây và đóng gói ảnh OCI cho từng thành phần mỗi khi mã nguồn
+thay đổi. Tekton được chọn thay cho các dịch vụ CI bên ngoài (như GitHub Actions) vì nó
+chạy nội cụm, không phụ thuộc hạ tầng ngoài, giúp toàn bộ pipeline khép kín và kiểm toán
+được --- phù hợp với một hệ thống an ninh đề cao tính tự chủ.
+
+\subsection{Harbor --- kho ảnh container riêng}
+
+\techlogo{harbor.png}{Logo Harbor.}{fig:logo-harbor}
+Harbor là kho ảnh (\textit{registry}) container mã nguồn mở, một dự án CNCF, bổ sung các
+tính năng an ninh chuỗi cung ứng so với một registry thông thường. Trong đồ án, Harbor là
+nơi lưu trữ các ảnh do Tekton tạo ra; trước khi một ảnh được phép triển khai, Harbor quét
+lỗ hổng và cho phép ký ảnh để bảo đảm tính toàn vẹn. Harbor được chọn thay cho một registry
+công cộng (như Docker Hub) vì nó là kho \emph{riêng}, có kiểm soát truy cập và quét bảo mật
+--- yêu cầu thiết yếu khi vận hành một hệ thống an ninh.
+
+\subsection{ArgoCD --- triển khai theo mô hình GitOps}
+
+\techlogo{argo.png}{Logo Argo (ArgoCD).}{fig:logo-argo}
+ArgoCD là công cụ triển khai liên tục (CD) theo mô hình GitOps: trạng thái mong muốn của
+cụm được khai báo trong một kho Git, và ArgoCD liên tục đồng bộ cụm thật về đúng khai báo
+đó, tự dọn dẹp tài nguyên thừa và tự chữa lành khi có sai lệch. Trong đồ án, ArgoCD triển
+khai toàn bộ hệ thống từ các manifest trong Git, nên mọi thay đổi đều có dấu vết và có thể
+khôi phục. ArgoCD được chọn vì mô hình khai báo của nó làm cho hệ thống \emph{tái lập được}
+và \emph{kiểm toán được} --- một yêu cầu phi chức năng quan trọng đã nêu ở
+Chương~\ref{ch:overview}.
+
+Ba công cụ Tekton, Harbor và ArgoCD tạo thành một chuỗi cung ứng phần mềm \emph{gốc
+Kubernetes} khép kín trong cụm: Tekton xây ảnh, Harbor lưu và quét ảnh, ArgoCD triển khai
+theo Git. Kết hợp với mô hình ảnh bất biến của Docker, chuỗi này là cơ sở kỹ thuật cho tính
+tái lập và kiểm toán của toàn nền tảng.
+
+\subsection{Kiến trúc nền tảng tổng thể và khác biệt với cách tiếp cận truyền thống}
+
+Hình~\ref{fig:platform} tổng hợp toàn bộ các tầng nền tảng và đặt trên đó là ứng dụng
+đặc thù của đồ án (bộ thu thập, pipeline, các dịch vụ SOC). Điểm cốt lõi mà sơ đồ muốn
+làm nổi bật nằm ở mũi tên nhấn mạnh tầng nhân: ứng dụng quan sát lưu lượng \emph{ngay
+tại tầng nhân} của mỗi nút, thay vì ở biên mạng hay bên trong mã ứng dụng.
+
+\begin{figure}[H]
+  \centering
+  \resizebox{0.95\linewidth}{!}{\input{../shared/figures/platform-stack}}
+  \caption{Sơ đồ nền tảng tổng thể: các tầng từ nhân Linux tới ứng dụng đặc thù.}
+  \label{fig:platform}
+\end{figure}
+
+Sự khác biệt so với các kiến trúc truyền thống có thể nhìn trên bốn trục. Thứ nhất, về
+\emph{vị trí quan sát}: an ninh chu vi truyền thống đặt thiết bị giám sát ở biên mạng
+(hướng Bắc -- Nam) và gần như không thấy lưu lượng nội bộ giữa các dịch vụ, trong khi
+nền tảng này quan sát toàn bộ lưu lượng Đông -- Tây ngay ở tầng nhân, đúng tinh thần
+Zero-Trust \cite{nist800207}. Thứ hai, về \emph{cách thu thập}: thay vì cài tác nhân
+vào từng ứng dụng (xâm lấn, phụ thuộc ngôn ngữ) hay phản chiếu gói toàn mạng (tốn kém),
+eBPF cho phép thu thập không xâm lấn và độ phủ toàn nút chỉ với một \texttt{DaemonSet}.
+Thứ ba, về \emph{mô hình vận hành}: hạ tầng truyền thống thường cấu hình thủ công và
+trạng thái trôi dạt theo thời gian, còn nền tảng này khai báo bằng GitOps với ảnh bất
+biến nên tái lập được và kiểm toán được. Thứ tư, về \emph{vòng phản hồi}: thay vì phân
+tích theo lô rồi xử lý sự cố thủ công như các hệ SIEM cổ điển, hệ thống phát hiện trực
+tuyến bằng cấu trúc dữ liệu luồng và khép kín vòng phản hồi bằng \texttt{NetworkPolicy}
+có người duyệt. Chính bốn khác biệt này tạo nên giá trị của việc xây dựng ứng dụng an
+ninh \emph{trên} một nền tảng cloud-native hiện đại, và là tiền đề cho phần thiết kế hệ
+thống ở Chương~\ref{ch:design}.
+
+\section{Kết luận chương}
+
+Chương này đã thiết lập đầy đủ nền tảng lý thuyết và công nghệ cho phần còn lại của đồ
+án. Bốn trụ lý thuyết được lựa chọn không phải ngẫu nhiên mà bám sát đúng đường đi của
+một sự kiện trong hệ thống: sự kiện kết nối được \emph{thu thập} ở tầng nhân bằng eBPF
+(Mục~\ref{sec:theory-ebpf}), được \emph{đếm tần suất} bằng Count-Min Sketch để phát hiện
+quét cổng (Mục~\ref{sec:theory-cms}), rồi được \emph{phân tích quan hệ} bằng các giải
+thuật đồ thị Tarjan và BFS, đồng thời \emph{phân loại} theo vùng địa chỉ bằng LPM-Trie
+(Mục~\ref{sec:graph-ip}). Với mỗi giải thuật, chương đã trình bày ý tưởng, công thức,
+mã giả và ví dụ chạy tay; riêng phần ước lượng tần suất chỉ nêu lại kết quả cô đọng, còn
+toàn bộ chứng minh đầy đủ (giới hạn lỗi, cận dưới không gian, so sánh Misra--Gries và
+Count Sketch) đã được phát triển chi tiết trong Báo cáo học phần tốt nghiệp (CNPM~1) và
+được tham chiếu khi cần.
+
+Bên cạnh các giải thuật, chương cũng đã giới thiệu từng công nghệ nền tảng --- từ
+Kubernetes, Calico, containerd đến NATS, PostgreSQL, Prometheus/Grafana và chuỗi cung
+ứng phần mềm --- cùng lý do lựa chọn, và kết lại bằng một bức tranh tổng thể về nền tảng
+cùng bốn điểm khác biệt so với các kiến trúc truyền thống. Những cơ sở này là tiền đề
+trực tiếp cho việc phân tích và thiết kế hệ thống ở Chương~\ref{ch:design}.

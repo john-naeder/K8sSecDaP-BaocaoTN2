@@ -1,0 +1,25 @@
+# Traefik IngressRoute + Middleware definitions per exposed app.
+# Manifests live at platform/cloudflared/ingress/ (kept colocated
+# with cloudflared so route changes ship in the same PR as tunnel edits).
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: ingress-routing
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: git@github.com:john-naeder/K8sSecDaP-deploy.git
+    targetRevision: main
+    path: platform/cloudflared/ingress
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: traefik
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

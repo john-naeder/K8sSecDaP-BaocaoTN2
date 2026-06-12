@@ -1,0 +1,26 @@
+% Bieu do hieu chinh phat hien: so ket noi/cua so vs nguong 40 (so lieu THAT). Chuong 5.
+\begin{tikzpicture}
+\begin{axis}[
+    ybar,
+    width=12cm, height=6.2cm,
+    bar width=15pt,
+    every axis plot/.append style={bar shift=0pt},
+    ymin=0, ymax=70,
+    ylabel={Số kết nối / cửa sổ 60\,s},
+    xlabel={Mẫu đo (theo số kết nối)},
+    xtick={1,2,3,4,5,6,7,8},
+    xticklabels={15,20,25,30,35,38,45,60},
+    enlarge x limits=0.08,
+    nodes near coords, every node near coord/.append style={font=\scriptsize},
+    tick label style={font=\scriptsize}, label style={font=\small},
+    legend style={font=\scriptsize, at={(0.02,0.97)}, anchor=north west, draw=none, fill=none},
+    legend cell align=left,
+]
+  \addplot[fill=blue!35, draw=blue!65] coordinates {(1,15)(2,20)(3,25)(4,30)(5,35)(6,38)};
+  \addplot[fill=red!35,  draw=red!70]  coordinates {(7,45)(8,60)};
+  \legend{hợp lệ --- không cảnh báo, $>$ ngưỡng --- cảnh báo}
+  \draw[red!70!black, thick, dashed]
+    (axis cs:0.4,40) -- (axis cs:8.6,40)
+    node[below left=-2pt, font=\scriptsize]{ngưỡng = 40};
+\end{axis}
+\end{tikzpicture}

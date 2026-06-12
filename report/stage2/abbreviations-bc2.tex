@@ -1,0 +1,82 @@
+% ============================================================================
+% Bang dien giai tu viet tat va ky hieu — RIENG cho BC2 (do an tot nghiep).
+% Tach khoi ../shared/abbreviations.tex (dung chung voi BC1) de bang ky hieu
+% phan anh dung cac ky hieu dung trong bao cao nay, khong phai cua BC1.
+% ============================================================================
+
+\chapter*{BẢNG DIỄN GIẢI TỪ VIẾT TẮT VÀ TIẾNG ANH}
+\addcontentsline{toc}{chapter}{BẢNG DIỄN GIẢI TỪ VIẾT TẮT VÀ TIẾNG ANH}
+
+\begin{longtable}{@{}p{3.0cm} >{\raggedright\arraybackslash}p{6cm} >{\raggedright\arraybackslash}p{5.5cm}@{}}
+
+\textbf{Tên viết tắt} & \textbf{Tên (English)} & \textbf{Diễn giải (Tiếng Việt)} \\
+\midrule
+\endfirsthead
+
+BFS     & Breadth-First Search & Tìm kiếm theo chiều rộng \\
+BPMN    & Business Process Model and Notation & Ký pháp mô hình hóa quy trình nghiệp vụ \\
+BFD     & Business Function Diagram & Sơ đồ phân rã chức năng nghiệp vụ \\
+BTF     & BPF Type Format & Định dạng thông tin kiểu dữ liệu của kernel, nền tảng cho CO-RE \\
+C4      & C4 model & Mô hình kiến trúc phần mềm bốn mức (Context/Container/Component/Code) \\
+CI      & Confidence Interval & Khoảng tin cậy (thống kê), ở đây dùng mức 95\% \\
+CMS     & Count-Min Sketch & Cấu trúc dữ liệu "sketch" ước lượng tần suất phần tử trong luồng với sai số kiểm soát được \\
+CNI     & Container Network Interface & Chuẩn cắm mạng cho container/Kubernetes (vd Calico, Cilium) \\
+CO-RE   & Compile Once -- Run Everywhere & Kỹ thuật biên dịch eBPF một lần chạy trên nhiều phiên bản kernel nhờ BTF \\
+CSDL    & Database & Cơ sở dữ liệu \\
+DFD     & Data Flow Diagram & Sơ đồ luồng dữ liệu \\
+eBPF    & extended Berkeley Packet Filter & Kỹ thuật chạy mã trong nhân Linux để quan sát/xử lý sự kiện một cách an toàn \\
+ERD     & Entity--Relationship Diagram & Sơ đồ thực thể -- quan hệ (thiết kế CSDL) \\
+FPR     & False Positive Rate & Tỷ lệ báo động giả (lưu lượng hợp lệ bị gắn cờ tấn công) \\
+FR      & Functional Requirement & Yêu cầu chức năng \\
+GitOps  & GitOps & Mô hình triển khai khai báo, đồng bộ trạng thái cụm từ Git \\
+IP      & Internet Protocol & Giao thức Internet dùng để định danh và chuyển gói tin \\
+K8s     & Kubernetes & Hệ thống điều phối container (deployment, scaling, scheduling) \\
+kprobe  & Kernel probe & Điểm chèn (hook) động vào hàm nhân để chạy chương trình eBPF \\
+LPM     & Longest Prefix Match & Khớp tiền tố dài nhất (phân loại địa chỉ theo CIDR) \\
+MTTR    & Mean Time To Respond & Thời gian trung bình để phản hồi/xử lý sự cố \\
+NetworkPolicy & Kubernetes NetworkPolicy & Đối tượng K8s khai báo luật cho/chặn lưu lượng pod (do CNI thực thi) \\
+NFR     & Non-Functional Requirement & Yêu cầu phi chức năng \\
+NIDS    & Network Intrusion Detection System & Hệ phát hiện xâm nhập ở mức mạng \\
+nmap    & Network Mapper & Công cụ quét cổng/dịch vụ mạng phổ biến \\
+OCI     & Open Container Initiative & Chuẩn ảnh và runtime container mở \\
+RBAC    & Role-Based Access Control & Kiểm soát truy cập theo vai trò \\
+RingBuf & Ring Buffer & Bộ đệm vòng của eBPF để chuyển sự kiện lên không gian người dùng \\
+SCC     & Strongly Connected Component & Thành phần liên thông mạnh (trong đồ thị có hướng) \\
+SIEM    & Security Information and Event Management & Hệ quản lý thông tin và sự kiện an ninh (phân tích nhật ký) \\
+SLR     & Systematic Literature Review & Tổng quan tài liệu có hệ thống \\
+SOC     & Security Operations Center & Trung tâm vận hành an ninh (giám sát và phản ứng sự cố) \\
+SRE     & Site Reliability Engineering & Kỹ nghệ độ tin cậy hệ thống (vận hành) \\
+TCP     & Transmission Control Protocol & Giao thức truyền tải hướng kết nối, tin cậy \\
+UC      & Use Case & Ca sử dụng (trong phân tích yêu cầu) \\
+UML     & Unified Modeling Language & Ngôn ngữ mô hình hóa thống nhất \\
+YAML    & YAML Ain't Markup Language & Ngôn ngữ dữ liệu cấu hình dạng phân cấp \\
+
+\end{longtable}
+
+\clearpage
+
+% ============================================================================
+% Bang dien giai ky hieu — cac ky hieu dung trong BC2
+% ============================================================================
+
+\chapter*{BẢNG DIỄN GIẢI KÝ HIỆU}
+\addcontentsline{toc}{chapter}{BẢNG DIỄN GIẢI KÝ HIỆU}
+
+\begin{longtable}{@{}p{3.5cm} p{10.5cm}@{}}
+
+$S$                    & Luồng sự kiện kết nối đầu vào của bộ phát hiện \\
+$\tau$                 & Ngưỡng phát hiện quét cổng (số kết nối/cửa sổ; trong đồ án $\tau = 40$) \\
+$d,\ w$                & Chiều sâu (số hàm băm) và chiều rộng của Count-Min Sketch ($d=5$, $w=2048$) \\
+$M$                    & Ma trận đếm của Count-Min Sketch, kích thước $d \times w$ \\
+$h_i$                  & Hàm băm thứ $i$ của Count-Min Sketch, $i = 1, \ldots, d$ \\
+$\hat{f}_x$            & Tần suất (số kết nối) ước lượng của nguồn $x$ trong cửa sổ \\
+$\varepsilon,\ \delta$ & Tham số sai số và xác suất thất bại của ước lượng Count-Min Sketch \\
+$F_0$                  & Số nguồn phân biệt xuất hiện trong cửa sổ (lực lượng tập khóa) \\
+$G = (V, E)$           & Đồ thị truyền thông có hướng: đỉnh $V$ là địa chỉ IP, cung $E$ là kết nối \\
+$s$                    & Đỉnh nguồn (pod nghi vấn) trong phân tích đồ thị \\
+$k$                    & Số bước (hop) tối đa của BFS bán kính ảnh hưởng (trong đồ án $k = 3$) \\
+$R_k(s)$               & Bán kính ảnh hưởng: tập pod tới được từ nguồn $s$ trong không quá $k$ bước \\
+$p_{50},\ p_{95}$      & Trung vị và phân vị 95 của độ trễ phản hồi \\
+$O(\cdot)$             & Ký hiệu Big-O: cận trên về độ phức tạp thời gian/không gian \\
+
+\end{longtable}

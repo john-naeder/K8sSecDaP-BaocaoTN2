@@ -1,0 +1,92 @@
+# =============================================================================
+# RBAC for Tekton Triggers — ServiceAccount + Roles
+# =============================================================================
+#
+# The EventListener needs permissions to:
+#   1. Create PipelineRuns (via TriggerTemplate)
+#   2. Read TriggerBindings and TriggerTemplates
+#   3. Create EventListener resources
+# =============================================================================
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: tekton-triggers-sa
+  namespace: tekton-pipelines
+  labels:
+    app.kubernetes.io/part-of: slsa-pipeline
+
+---
+# Role to manage triggers and create PipelineRuns
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: tekton-triggers-role
+  namespace: tekton-pipelines
+rules:
+    # Triggers resources
+    - apiGroups: ["triggers.tekton.dev"]
+      resources:
+        - eventlisteners
+        - triggerbindings
+        - triggertemplates
+        - triggers
+        - interceptors
+      verbs: ["get", "list", "watch"]
+    # Create PipelineRuns
+    - apiGroups: ["tekton.dev"]
+      resources:
+        - pipelineruns
+        - pipelineresources
+      verbs: ["create"]
+    # Read Pipelines
+    - apiGroups: ["tekton.dev"]
+      resources:
+        - pipelines
+      verbs: ["get", "list"]
+    # ConfigMaps for logging
+    - apiGroups: [""]
+      resources:
+        - configmaps
+      verbs: ["get", "list", "watch"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: tekton-triggers-binding
+  namespace: tekton-pipelines
+subjects:
+  - kind: ServiceAccount
+    name: tekton-triggers-sa
+    namespace: tekton-pipelines
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: tekton-triggers-role
+
+---
+# ClusterRole for EventListener to read cluster-scoped interceptors
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: tekton-triggers-clusterrole
+rules:
+  - apiGroups: ["triggers.tekton.dev"]
+    resources:
+      - clusterinterceptors
+      - clustertriggerbindings
+    verbs: ["get", "list", "watch"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: tekton-triggers-clusterbinding
+subjects:
+  - kind: ServiceAccount
+    name: tekton-triggers-sa
+    namespace: tekton-pipelines
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: tekton-triggers-clusterrole

@@ -1,0 +1,136 @@
+{
+  "title": "Zero-Trust SOC — Incidents & Actions",
+  "uid": "zt-soc-incidents",
+  "schemaVersion": 39,
+  "version": 1,
+  "tags": ["zero-trust", "soc", "incidents"],
+  "timezone": "browser",
+  "time": { "from": "now-1h", "to": "now" },
+  "refresh": "10s",
+  "templating": {
+    "list": [
+      {
+        "name": "DS_PROM",
+        "type": "datasource",
+        "query": "prometheus",
+        "current": { "text": "Prometheus", "value": "Prometheus" },
+        "label": "Prometheus datasource"
+      },
+      {
+        "name": "DS_LOKI",
+        "type": "datasource",
+        "query": "loki",
+        "current": { "text": "Loki", "value": "Loki" },
+        "label": "Loki datasource"
+      }
+    ]
+  },
+  "panels": [
+    {
+      "type": "stat",
+      "id": 1,
+      "title": "Incidents created (rate/min)",
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROM}" },
+      "targets": [
+        { "expr": "sum(rate(zt_incidents_created_total[$__interval])) * 60", "refId": "A" }
+      ],
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "fieldConfig": { "defaults": { "decimals": 1 } }
+    },
+    {
+      "type": "stat",
+      "id": 2,
+      "title": "Active incidents (window)",
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROM}" },
+      "targets": [
+        { "expr": "sum(zt_aggregator_active_incidents)", "refId": "A" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": { "mode": "absolute", "steps": [
+            { "color": "green",  "value": null },
+            { "color": "yellow", "value": 5 },
+            { "color": "red",    "value": 20 }
+          ]}
+        }
+      }
+    },
+    {
+      "type": "stat",
+      "id": 3,
+      "title": "Cross-node attackers",
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROM}" },
+      "targets": [
+        { "expr": "sum(zt_aggregator_active_cross_node_incidents)", "refId": "A" }
+      ],
+      "fieldConfig": { "defaults": { "color": { "mode": "fixed", "fixedColor": "red" } } }
+    },
+    {
+      "type": "stat",
+      "id": 4,
+      "title": "NetworkPolicy drafts generated",
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROM}" },
+      "targets": [
+        { "expr": "sum(zt_actions_generated_total)", "refId": "A" }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "id": 10,
+      "title": "Aggregator pipeline (received vs emitted vs suppressed)",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROM}" },
+      "targets": [
+        { "expr": "rate(zt_aggregator_alerts_received_total[$__interval])",   "legendFormat": "received",  "refId": "A" },
+        { "expr": "rate(zt_aggregator_alerts_emitted_total[$__interval])",    "legendFormat": "emitted ({{reason}})", "refId": "B" },
+        { "expr": "rate(zt_aggregator_alerts_suppressed_total[$__interval])", "legendFormat": "suppressed", "refId": "C" }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "id": 11,
+      "title": "Incident-service throughput",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROM}" },
+      "targets": [
+        { "expr": "rate(zt_incident_alerts_received_total[$__interval])", "legendFormat": "received",   "refId": "A" },
+        { "expr": "rate(zt_incidents_created_total[$__interval])",        "legendFormat": "new",        "refId": "B" },
+        { "expr": "rate(zt_incidents_updated_total[$__interval])",        "legendFormat": "updated",    "refId": "C" },
+        { "expr": "rate(zt_actions_generated_total[$__interval])",        "legendFormat": "actions",    "refId": "D" }
+      ]
+    },
+    {
+      "type": "logs",
+      "id": 20,
+      "title": "Incident-service log (audit + actions)",
+      "gridPos": { "h": 12, "w": 24, "x": 0, "y": 12 },
+      "datasource": { "type": "loki", "uid": "${DS_LOKI}" },
+      "targets": [
+        { "expr": "{namespace=\"soc\", container=~\"incident-service|aggregator\"}", "refId": "A" }
+      ],
+      "options": {
+        "showTime": true,
+        "wrapLogMessage": true,
+        "sortOrder": "Descending",
+        "dedupStrategy": "none",
+        "showCommonLabels": false
+      }
+    },
+    {
+      "type": "table",
+      "id": 30,
+      "title": "Subscriber error rate",
+      "gridPos": { "h": 6, "w": 24, "x": 0, "y": 24 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROM}" },
+      "targets": [
+        { "expr": "sum by (instance, kind) (rate(zt_aggregator_parse_errors_total[$__interval]))", "legendFormat": "{{instance}}-aggregator", "refId": "A", "format": "table" },
+        { "expr": "sum by (instance) (rate(zt_incident_subscriber_errors_total[$__interval]))",    "legendFormat": "{{instance}}-incident",   "refId": "B", "format": "table" }
+      ]
+    }
+  ]
+}

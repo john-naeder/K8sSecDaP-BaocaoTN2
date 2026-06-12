@@ -1,0 +1,26 @@
+# Lightweight CoreDNS authoritative for *.zt.local — see platform/dns/ for
+# the actual manifest. Wired up as a sibling Application so namespace
+# `dns` can sit at the same sync wave as cloudflared (both are networking
+# entry points).
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: dns-local
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: git@github.com:john-naeder/K8sSecDaP-deploy.git
+    targetRevision: main
+    path: platform/dns
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: dns
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

@@ -1,0 +1,74 @@
+# kaniko-build Task — build & push OCI image with Kaniko (rootless)
+# Outputs IMAGE_URL and IMAGE_DIGEST for Tekton Chains SLSA provenance
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: kaniko-build
+  namespace: tekton-pipelines
+  labels:
+    app.kubernetes.io/part-of: slsa-pipeline
+spec:
+  description: >-
+    Build a container image with Kaniko and push to an OCI registry.
+    Produces IMAGE_URL and IMAGE_DIGEST results that Tekton Chains
+    uses to generate SLSA provenance attestations.
+  params:
+    - name: IMAGE
+      description: Full image reference (registry/repo:tag)
+      type: string
+    - name: DOCKERFILE
+      description: Path to the Dockerfile relative to the context
+      type: string
+      default: "./Dockerfile"
+    - name: CONTEXT
+      description: Build context directory
+      type: string
+      default: "."
+    - name: EXTRA_ARGS
+      description: Extra args for Kaniko executor
+      type: array
+      default: []
+  results:
+    # ── These names are required by Tekton Chains ──
+    - name: IMAGE_URL
+      description: Image URL that was built and pushed
+    - name: IMAGE_DIGEST
+      description: Digest (sha256:...) of the built image
+  workspaces:
+    - name: source
+      description: Workspace containing the source code and Dockerfile
+  steps:
+    - name: build-and-push
+      image: gcr.io/kaniko-project/executor:v1.23.2
+      computeResources:
+        requests:
+          cpu: 500m
+          memory: 512Mi
+        limits:
+          cpu: "1"
+          memory: 1Gi
+      args:
+        - --dockerfile=$(params.DOCKERFILE)
+        - --context=$(workspaces.source.path)/$(params.CONTEXT)
+        - --destination=$(params.IMAGE)
+        - --digest-file=$(results.IMAGE_DIGEST.path)
+        - --snapshot-mode=time
+        - --compressed-caching=true
+        - $(params.EXTRA_ARGS[*])
+      securityContext:
+        runAsUser: 0
+      env:
+        - name: DOCKER_CONFIG
+          value: /tekton/creds/.docker
+    - name: write-url
+      image: alpine:3.20
+      computeResources:
+        requests:
+          cpu: 10m
+          memory: 16Mi
+        limits:
+          cpu: 50m
+          memory: 64Mi
+      script: |
+        printf "%s" "$(params.IMAGE)" > "$(results.IMAGE_URL.path)"
+        echo "Built and pushed: $(params.IMAGE)"

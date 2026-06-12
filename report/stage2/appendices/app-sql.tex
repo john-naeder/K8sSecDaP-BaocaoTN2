@@ -1,0 +1,65 @@
+\chapter{DDL và truy vấn mẫu của PostgreSQL}
+\label{app:sql}
+
+Lược đồ dữ liệu của dịch vụ sự cố (kho \texttt{K8sSecDaP-soc}) được khai báo trong các
+tệp migration \texttt{001\_init.sql} \dots \texttt{004\_incident\_pod\_context.sql},
+nhúng vào nhị phân và áp tự động (idempotent) khi khởi động. Phần dưới trích DDL khởi tạo
+bốn bảng cốt lõi và một số chỉ mục; sơ đồ quan hệ thực thể (ERD) tương ứng đã trình bày ở
+Chương~\ref{ch:design}.
+
+\begin{lstlisting}[language=SQL,caption={DDL khởi tạo bốn bảng cốt lõi (\texttt{001\_init.sql}, rút gọn).}]
+CREATE TABLE IF NOT EXISTS incidents (
+    id               BIGSERIAL PRIMARY KEY,
+    incident_key     TEXT NOT NULL,                 -- type|source: khoa khu trung lap
+    type             TEXT NOT NULL,
+    source_ip        TEXT NOT NULL,
+    severity         TEXT NOT NULL DEFAULT 'medium',
+    status           TEXT NOT NULL DEFAULT 'new',   -- new|ack|resolved|suppressed
+    nodes_observed   TEXT[] NOT NULL DEFAULT '{}',
+    first_seen_ns    BIGINT NOT NULL,
+    last_seen_ns     BIGINT NOT NULL,
+    occurrence_count INT  NOT NULL DEFAULT 1,
+    blast_radius     JSONB,
+    tags             TEXT[] NOT NULL DEFAULT '{}',
+    cross_node       BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (incident_key)
+);
+CREATE INDEX IF NOT EXISTS idx_incidents_status    ON incidents (status);
+CREATE INDEX IF NOT EXISTS idx_incidents_last_seen ON incidents (last_seen_ns DESC);
+
+CREATE TABLE IF NOT EXISTS alerts (
+    id          BIGSERIAL PRIMARY KEY,
+    incident_id BIGINT REFERENCES incidents(id) ON DELETE CASCADE,
+    alert_json  JSONB NOT NULL,
+    received_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS actions (
+    id          BIGSERIAL PRIMARY KEY,
+    incident_id BIGINT NOT NULL REFERENCES incidents(id) ON DELETE CASCADE,
+    type        TEXT NOT NULL,                    -- vd: quarantine_pod
+    status      TEXT NOT NULL DEFAULT 'pending',  -- pending|approved|rejected|executed|...
+    yaml_draft  TEXT NOT NULL,
+    approved_by TEXT, approved_at TIMESTAMPTZ,
+    executed_at TIMESTAMPTZ, error TEXT,
+    expires_at  TIMESTAMPTZ NOT NULL DEFAULT (NOW() + INTERVAL '24 hours'),
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS audit_log (
+    id          BIGSERIAL PRIMARY KEY,
+    actor       TEXT NOT NULL, actor_role TEXT,
+    action      TEXT NOT NULL,                    -- ack|resolve|approve|reject|...
+    target_type TEXT NOT NULL, target_id BIGINT NOT NULL,
+    diff        JSONB,
+    occurred_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+\end{lstlisting}
+
+Phép gộp các lần xuất hiện lặp của cùng một sự cố dựa trên ràng buộc duy nhất
+\texttt{UNIQUE (incident\_key)} kết hợp câu lệnh \texttt{INSERT ... ON CONFLICT
+(incident\_key) DO UPDATE} (mô tả ở mục~\ref{subsec:impl-incident}). Hàm phụ trợ
+\texttt{severityRank()} trong cùng migration sắp thứ tự mức nghiêm trọng để phép
+\texttt{ON CONFLICT} chỉ nâng (không hạ) mức của sự cố đã có.

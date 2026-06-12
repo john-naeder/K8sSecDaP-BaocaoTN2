@@ -1,0 +1,94 @@
+% Kịch bản tấn công port-scan trên cụm Kubernetes giả lập.
+% Include từ Phụ lục B (app-cms-trace.tex).
+\begin{tikzpicture}[
+    every node/.style={font=\footnotesize},
+    pod/.style    ={draw, rectangle, rounded corners=2pt, minimum width=1.9cm,
+                    minimum height=0.8cm, align=center},
+    fe/.style     ={pod, fill=blue!12},
+    be/.style     ={pod, fill=green!15},
+    db/.style     ={pod, fill=orange!18},
+    infra/.style  ={pod, fill=violet!12},
+    attacker/.style={pod, fill=red!25, draw=red!70!black, very thick, font=\footnotesize\bfseries},
+    detector/.style={pod, fill=yellow!25, draw=black, dashed, minimum width=2.6cm,
+                    minimum height=1.0cm, align=center, font=\footnotesize\itshape},
+    normal/.style ={-{Stealth[length=2mm]}, gray!60, thin},
+    scan/.style   ={-{Stealth[length=2mm]}, red!75!black, thick, dashed},
+    alert/.style  ={-{Stealth[length=2.5mm]}, orange!80!black, very thick},
+  ]
+  % Subnet boxes
+  \node[draw, rounded corners=4pt, dotted, minimum width=8cm, minimum height=2.0cm,
+        label={[anchor=west, font=\footnotesize\itshape]above left:Subnet 10.0.1.X (Frontend)}]
+       (feNet) at (0, 4.5) {};
+  \node[draw, rounded corners=4pt, dotted, minimum width=8cm, minimum height=2.0cm,
+        label={[anchor=west, font=\footnotesize\itshape]above left:Subnet 10.0.2.X (Backend)}]
+       (beNet) at (0, 2) {};
+  \node[draw, rounded corners=4pt, dotted, minimum width=8cm, minimum height=2.0cm,
+        label={[anchor=west, font=\footnotesize\itshape]above left:Subnet 10.0.3.X (Database / Cache)}]
+       (dbNet) at (0, -0.5) {};
+  \node[draw, rounded corners=4pt, dotted, minimum width=8cm, minimum height=2.0cm,
+        label={[anchor=west, font=\footnotesize\itshape]above left:Subnet 10.0.4.X (Infra)}]
+       (inNet) at (0, -3) {};
+
+  % Frontend pods
+  \node[fe] (fe1) at (-2.7, 4.5) {frontend-1\\\texttt{10.0.1.10}};
+  \node[fe] (fe2) at (0,    4.5) {frontend-2\\\texttt{10.0.1.11}};
+  \node[fe] (fe3) at (2.7,  4.5) {frontend-3\\\texttt{10.0.1.12}};
+
+  % Backend pods
+  \node[be] (be1) at (-2.7, 2) {backend-1\\\texttt{10.0.2.10}};
+  \node[be] (be2) at (0,    2) {backend-2\\\texttt{10.0.2.11}};
+  \node[be] (be3) at (2.7,  2) {backend-3\\\texttt{10.0.2.12}};
+
+  % DB pods
+  \node[db] (pg)    at (-1.5, -0.5) {postgres\\\texttt{10.0.3.10}};
+  \node[db] (redis) at ( 1.5, -0.5) {redis\\\texttt{10.0.3.11}};
+
+  % Infra pods
+  \node[infra] (prom) at (-1.5, -3) {prometheus\\\texttt{10.0.4.10}};
+  \node[infra] (graf) at ( 1.5, -3) {grafana\\\texttt{10.0.4.11}};
+
+  % Attacker (separate, off to the side)
+  \node[attacker] (att) at (-7, 1.5) {attacker\\\texttt{10.0.5.99}};
+
+  % Detector (right side)
+  \node[detector] (det) at (7.5, 1.5) {portscan-pipeline\\(CMS + MG + HashMap)};
+  \node[font=\footnotesize\bfseries, fill=red!15, draw=red!70!black, rounded corners=2pt,
+        inner sep=3pt, anchor=north, align=center]
+        (alert) at ($(det.south) + (0, -0.4)$)
+        {\texttt{alerts.json}\\\textit{port\_scan: 10.0.5.99}};
+
+  % Normal traffic (a few representative arrows)
+  \draw[normal] (fe1) -- (be1);
+  \draw[normal] (fe2) -- (be2);
+  \draw[normal] (fe3) -- (be3);
+  \draw[normal] (be1) -- (pg);
+  \draw[normal] (be2) -- (pg);
+  \draw[normal] (be1) -- (redis);
+  \draw[normal] (prom.north) -- (be1.south);
+  \draw[normal] (graf) -- (prom);
+
+  % Port-scan attack: many edges from attacker to random targets
+  \draw[scan] (att) -- (fe1);
+  \draw[scan] (att) -- (fe2);
+  \draw[scan] (att) -- (fe3);
+  \draw[scan] (att) -- (be1);
+  \draw[scan] (att) -- (be2);
+  \draw[scan] (att) -- (be3);
+  \draw[scan] (att) -- (pg);
+  \draw[scan] (att) -- (redis);
+  \draw[scan] (att) -- (prom);
+  \draw[scan] (att) -- (graf);
+
+  % Detection pipeline: tap on subnet -> detector
+  \draw[alert, dotted] (3.5, 1.5) -- node[above, font=\footnotesize\itshape] {tcpdump SYN} (det.west);
+  \draw[alert] (det.south) -- (alert.north);
+
+  % Legend
+  \node[font=\scriptsize\itshape, anchor=north west, align=left,
+        fill=white, draw=gray!50, rounded corners=2pt, inner sep=4pt]
+        at (-7.5, -2.5)
+        {\textbf{Chú thích:}\\
+         \textcolor{gray!60}{$\rightarrow$} lưu lượng nền hợp lệ\\
+         \textcolor{red!75!black}{$\dashrightarrow$} gói SYN từ attacker\\
+         \textcolor{orange!80!black}{$\rightarrow$} luồng phát hiện};
+\end{tikzpicture}

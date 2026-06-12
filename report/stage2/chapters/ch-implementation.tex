@@ -1,0 +1,831 @@
+% ============================================================================
+% Chuong 4: CAI DAT, TRIEN KHAI VA THU NGHIEM HE THONG
+% ============================================================================
+
+\chapter{CÀI ĐẶT, TRIỂN KHAI VÀ THỬ NGHIỆM HỆ THỐNG}
+\label{ch:impl}
+
+Chương này trình bày \emph{toàn bộ} những gì đã được hiện thực và vận hành: từ hạ
+tầng nền tảng, qua ba thành phần lõi của vòng phát hiện~--~phản hồi (bộ thu thập
+eBPF, bộ máy pipeline và trung tâm vận hành an ninh~--~SOC), tới ứng dụng giao diện
+cho người vận hành, và cuối cùng là việc chạy thử nghiệm end-to-end trên cụm
+Kubernetes thật. Theo đúng trọng tâm của đề tài, phần trình bày \emph{đào sâu} vào
+bộ thu thập, pipeline và SOC~--~nơi đặt thuật toán phát hiện và logic phản hồi~--~kèm
+sơ đồ luồng, mã giả và trích đoạn mã nguồn/cấu hình thật; phần hạ tầng và triển khai
+chỉ được \emph{giới thiệu vắn tắt} nhưng vẫn liệt kê đủ thành phần. Những đoạn mã dài
+hơn được đưa vào phần Phụ lục. Phần đánh giá
+\emph{định lượng} (tỷ lệ phát hiện, FPR, chi phí, độ trễ) tách riêng sang
+Chương~\ref{ch:eval}; còn thiết kế kiến trúc/thành phần (sơ đồ) đã trình bày ở
+Chương~\ref{ch:design} và sẽ được tham chiếu lại khi cần.
+
+\section{Tổng quan hiện thực}
+\label{sec:impl-overview}
+
+Hệ thống được tổ chức thành nhiều kho mã nguồn độc lập, mỗi kho phụ trách một tầng và
+được đóng gói thành ảnh container riêng để xây dựng, kiểm thử, nâng cấp tách bạch.
+Bảng~\ref{tab:impl-stack} ánh xạ mỗi thành phần tới kho mã, ngôn ngữ, đối tượng
+Kubernetes và tệp mã nguồn cốt lõi; đây cũng là bản đồ tra cứu cho toàn bộ chương.
+
+\begin{table}[H]
+  \centering
+  \caption{Bản đồ hiện thực: thành phần $\rightarrow$ kho mã, ngôn ngữ, đóng gói và tệp cốt lõi.}
+  \label{tab:impl-stack}
+  \scriptsize
+  \begin{tabularx}{\linewidth}{@{}l l l l X@{}}
+    \toprule
+    \textbf{Thành phần} & \textbf{Kho mã} & \textbf{Ngôn ngữ} & \textbf{Đối tượng K8s} & \textbf{Tệp cốt lõi} \\
+    \midrule
+    Bộ thu thập eBPF      & \texttt{collector} & C (nhân) + C++ & \texttt{DaemonSet} (đặc quyền) & \texttt{tcp\_connect.bpf.c}, \texttt{collector.cpp} \\
+    Bộ máy pipeline       & \texttt{pipeline}  & C++17          & \texttt{DaemonSet} (sidecar)   & \texttt{engine.cpp}, \texttt{libdsa/} \\
+    Cầu nối cảnh báo      & \texttt{soc}       & Go             & \texttt{DaemonSet} (sidecar)   & \texttt{alert-bridge/main.go} \\
+    Bộ tổng hợp           & \texttt{soc}       & Go             & \texttt{Deployment}            & \texttt{aggregator/correlator.go} \\
+    Dịch vụ sự cố         & \texttt{soc}       & Go             & \texttt{Deployment}            & \texttt{incident-service/internal/*} \\
+    Console web           & \texttt{soc}       & Python (Flask) & \texttt{Deployment}            & \texttt{web-console/app.py} \\
+    Lưu trữ               & \texttt{soc}       & SQL            & \texttt{StatefulSet}           & \texttt{store/migrations/*.sql} \\
+    Hạ tầng \& triển khai & \texttt{infra}, \texttt{deploy} & Ansible, YAML & ArgoCD, Tekton & \texttt{ansible/}, \texttt{argocd/} \\
+    \bottomrule
+  \end{tabularx}
+\end{table}
+
+Luồng dữ liệu xuyên suốt các thành phần này như sau: lời gọi \texttt{connect()} của
+một pod $\rightarrow$ bộ thu thập eBPF (tầng nhân) $\rightarrow$ pipeline (phát hiện)
+$\rightarrow$ cảnh báo qua NATS $\rightarrow$ bộ tổng hợp (khử trùng lặp, tương quan)
+$\rightarrow$ dịch vụ sự cố (tạo sự cố, sinh chính sách cách ly) $\rightarrow$ người
+vận hành duyệt trên console $\rightarrow$ áp \texttt{NetworkPolicy} vào cụm.
+Hình~\ref{fig:arch-overview} cho cái nhìn tổng quát về toàn bộ kiến trúc: mặt phẳng
+phát hiện chạy phân tán trên mỗi node (DaemonSet), trung tâm SOC xử lý tập trung, tầng
+quan trắc và thực thi chính sách, cùng nền tảng GitOps/CI ở dưới. Các mục tiếp theo
+trình bày lần lượt từng mắt xích.
+
+\begin{figure}[H]
+  \centering
+  \resizebox{\linewidth}{!}{\input{../shared/figures/arch-overview}}
+  \caption{Sơ đồ tổng quát kiến trúc hệ thống.}
+  \label{fig:arch-overview}
+\end{figure}
+
+\section{Môi trường và công cụ triển khai}
+\label{sec:impl-env}
+
+Hệ thống được hiện thực và kiểm thử trên một cụm Kubernetes thật gồm ba node (một
+node control-plane và hai node worker), chạy hệ điều hành Ubuntu~24.04 với nhân Linux
+phiên bản~6.8 có sẵn BTF, runtime container \texttt{containerd} và mạng pod do CNI
+Calico đảm nhiệm (có hỗ trợ \texttt{NetworkPolicy}). Mỗi tầng được hiện thực bằng ngôn
+ngữ phù hợp với ràng buộc của tầng đó: chương trình tầng nhân viết bằng C và biên dịch
+sang đối tượng eBPF bằng \texttt{clang/LLVM}; bộ đọc và bộ máy pipeline viết bằng
+C++17 để kiểm soát chặt bộ nhớ và hiệu năng; các dịch vụ SOC viết bằng Go; console
+web viết bằng Python (Flask). Mỗi thành phần được đóng gói thành ảnh OCI riêng và nạp
+vào cụm qua đối tượng Kubernetes tương ứng (\texttt{DaemonSet}, \texttt{Deployment},
+\texttt{StatefulSet}). Việc tách bạch ngôn ngữ và đóng gói theo tầng giúp cô lập phần
+chạy đặc quyền ở tầng nhân khỏi phần logic nghiệp vụ.
+
+Tôi dựng cụm tự động bằng Ansible (kho \texttt{infra}): mỗi node được khởi tạo bằng
+\texttt{kubeadm}, cài \texttt{containerd}, rồi CNI Calico được áp qua role
+\texttt{cni\_calico}. Sau khi dựng xong, tôi kiểm chứng môi trường bằng
+\texttt{kubectl get nodes} (Mã nguồn~\ref{lst:get-nodes}): cả ba node ở trạng thái
+\texttt{Ready}, cùng nhân Linux 6.8 và runtime \texttt{containerd} --- xác nhận điều
+kiện chạy eBPF CO-RE (nhân $\geq 5.8$, có BTF) đã được thỏa mãn đồng nhất trên cụm.
+
+\begin{lstlisting}[language={},caption={Kiểm chứng cụm sau khi dựng bằng Ansible (kết quả \texttt{kubectl} rút gọn).},label={lst:get-nodes}]
+$ kubectl get nodes -o wide
+NAME               STATUS  ROLES          VERSION  KERNEL-VERSION    CONTAINER-RUNTIME
+userver-master     Ready   control-plane  v1.32.13  6.8.0-generic     containerd://2.2.4
+userver-worker-1   Ready   <none>         v1.32.13  6.8.0-generic     containerd://2.2.4
+userver-worker-home   Ready   <none>         v1.32.13  6.8.0-generic     containerd://2.2.4
+\end{lstlisting}
+
+\section{Hạ tầng nền tảng và triển khai (giới thiệu)}
+\label{sec:impl-platform}
+
+Phần này được trình bày vắn tắt vì không thuộc trọng tâm đề tài, nhưng vẫn nêu đủ các
+thành phần để bức tranh triển khai hoàn chỉnh. Toàn bộ trạng thái mong muốn của hệ
+thống được quản lý theo mô hình GitOps: manifest Kubernetes lưu trong kho Git và một
+ứng dụng ArgoCD (\texttt{zt-soc-core}) liên tục đồng bộ trạng thái cụm về đúng trạng
+thái khai báo, với hai tùy chọn \textit{prune} và \textit{self-heal} bật để tự dọn tài
+nguyên thừa và tự khôi phục khi có sai lệch. Quy trình tích hợp liên tục do pipeline
+\emph{Tekton} chạy ngay trong cụm đảm nhiệm: clone mã nguồn, dựng ảnh bằng Kaniko,
+đẩy lên kho ảnh riêng (\emph{Harbor}), rồi cập nhật thẻ ảnh trong manifest để ArgoCD
+triển khai. Hạ tầng node (cài đặt \texttt{kubeadm}, \texttt{containerd}, CNI Calico)
+được tự động hóa bằng Ansible trong kho \texttt{infra}.
+
+Cụ thể, gốc của cây GitOps là một \texttt{Application} kiểu ``app-of-apps'': nó trỏ vào
+thư mục \texttt{platform/argocd/apps} và sinh ra một \texttt{Application} con cho mỗi
+tệp, trong đó thứ tự triển khai được kiểm soát bằng \emph{sync-wave} để CNI luôn tồn
+tại trước khi pod SOC xin địa chỉ pod-network (Mã nguồn~\ref{lst:argocd}). Nhờ
+\textit{selfHeal}, mọi sai lệch thủ công đều bị kéo về đúng trạng thái khai báo trong
+Git.
+
+\begin{lstlisting}[language={},caption={Gốc GitOps ``app-of-apps'' và thứ tự sync-wave của các ứng dụng con (\texttt{platform/argocd/}).},label={lst:argocd}]
+# app-of-apps.yaml: goc, sinh 1 Application cho moi tep trong apps/
+kind: Application
+metadata: { name: platform-apps, namespace: argocd }
+spec:
+  source: { repoURL: ...K8sSecDaP-deploy.git, path: platform/argocd/apps }
+  syncPolicy: { automated: { prune: true, selfHeal: true } }
+---
+# Thu tu trien khai bang sync-wave (CNI truoc, SOC sau, lop du lieu cuoi):
+#   zt-cni-calico   sync-wave: "-10"   (prune/selfHeal=false — KHONG bao gio prune CNI)
+#   zt-soc-core     sync-wave: "0"     -> manifests/ cua K8sSecDaP-soc
+#   zt-soc-data     sync-wave: "10"    -> data/ (MinIO, cronjob bao cao tuan)
+\end{lstlisting}
+
+Quy trình CI là một Tekton \texttt{Pipeline} tên \texttt{build-and-deploy} gồm bốn
+\texttt{Task} tuần tự: \texttt{git-clone} $\rightarrow$ \texttt{kaniko-build} (dựng ảnh
+OCI không cần Docker daemon) $\rightarrow$ đẩy ảnh lên kho riêng $\rightarrow$
+\texttt{update-manifest} (vá thẻ ảnh vào manifest GitOps, commit để ArgoCD đồng bộ).
+Như vậy một thay đổi mã nguồn được đưa ra cụm hoàn toàn tự động và có thể truy vết qua
+Git.
+
+Để minh chứng các thành phần này thực sự đang chạy, tôi truy vấn trạng thái cụm
+(Mã nguồn~\ref{lst:argocd-proof}): các \texttt{Application} của ArgoCD đều
+\texttt{Synced/Healthy}, và \texttt{DaemonSet} thu thập \texttt{zt-pipeline-ebpf} hiện
+diện trên các node worker.
+
+\begin{lstlisting}[language={},caption={Minh chứng triển khai: ArgoCD đồng bộ và DaemonSet thu thập đang chạy (\texttt{kubectl} rút gọn).},label={lst:argocd-proof}]
+$ kubectl get applications -n argocd
+NAME            SYNC STATUS   HEALTH STATUS
+platform-apps   Synced        Healthy
+zt-cni-calico   Synced        Healthy
+zt-soc-core     Synced        Healthy
+zt-soc-data     Synced        Healthy
+
+$ kubectl get daemonset -n zt-mapper
+NAME               DESIRED   CURRENT   READY   NODE SELECTOR
+zt-pipeline-ebpf   2         2         2       <none>
+\end{lstlisting}
+
+Ở tầng truyền thông, các dịch vụ trao đổi cảnh báo qua trục thông điệp NATS theo các
+chủ đề có cấu trúc: \texttt{zt.alerts.raw} (đầu ra pipeline mỗi node) và
+\texttt{zt.alerts.enriched} (sau khi tổng hợp). Ở tầng lưu trữ, PostgreSQL chạy dưới
+dạng \texttt{StatefulSet} có ổ đĩa bền vững để giữ sự cố, cảnh báo và nhật ký kiểm
+toán. Hệ thống quan trắc Prometheus/Grafana cung cấp số liệu và dashboard cho đội vận
+hành. Hình~\ref{fig:deploy-topology} tóm tắt cách các thành phần phân bố trên cụm ba
+node cùng vòng đồng bộ GitOps.
+
+\begin{figure}[H]
+  \centering
+  \resizebox{0.95\linewidth}{!}{\input{../shared/figures/deploy-topology}}
+  \caption{Sơ đồ triển khai trên cụm Kubernetes ba node.}
+  \label{fig:deploy-topology}
+\end{figure}
+
+\section{Bộ thu thập eBPF}
+\label{sec:impl-collector}
+
+Bộ thu thập là mắt xích đầu tiên và là thành phần đặc quyền duy nhất chạm vào tầng
+nhân, nên được trình bày kỹ nhất. Về kiến trúc, nó gồm hai phần (đã mô tả ở
+Hình~\ref{fig:comp-collect-pipe}, Chương~\ref{ch:design}): \emph{chương trình tầng
+nhân} gắn \texttt{kprobe}/\texttt{kretprobe} vào hàm \texttt{tcp\_v4\_connect} và lọc
+sự kiện ngay trong nhân; và \emph{chương trình tầng người dùng} nạp, gắn chương trình
+eBPF, đọc sự kiện từ bộ đệm vòng rồi xuất ra dòng JSON.
+
+\subsection{Chương trình tầng nhân}
+\label{subsec:impl-kern}
+
+Chương trình tầng nhân khai báo ba BPF map, mỗi map giữ một vai trò rõ rệt:
+
+\begin{itemize}[leftmargin=1.4em]
+  \item \texttt{cidr\_map} (\texttt{LPM\_TRIE}, 1024 mục): ánh xạ tiền tố CIDR sang
+        nhãn (1=pod, 2=service, 3=node, 4=RFC1918, 5=loopback) để phân loại địa chỉ
+        \emph{ngay trong nhân}. Bắt buộc cờ \texttt{BPF\_F\_NO\_PREALLOC}.
+  \item \texttt{events} (\texttt{RINGBUF}, 256~KiB): kênh truyền sự kiện một chiều
+        từ nhân lên không gian người dùng, thay cho perf buffer cũ, cho thông lượng
+        cao hơn và không mất thứ tự.
+  \item \texttt{sock\_store} (\texttt{HASH}, khóa \texttt{pid\_tgid}): lưu tạm con
+        trỏ \texttt{struct sock} giữa lúc \texttt{kprobe} vào và \texttt{kretprobe}
+        ra, vì thông tin địa chỉ đích chỉ đầy đủ \emph{sau} khi kết nối được thiết lập.
+\end{itemize}
+
+Cơ chế hai pha (entry $\rightarrow$ return) là điểm tinh tế nhất: \texttt{kprobe} lúc
+vào chỉ lưu con trỏ socket theo \texttt{pid\_tgid}; \texttt{kretprobe} lúc ra mới đọc
+địa chỉ nguồn/đích bằng CO-RE (\texttt{BPF\_CORE\_READ}), \emph{lọc nguồn} (chỉ phát
+sự kiện có nhãn nguồn = 1, tức xuất phát từ mạng pod~--~đúng mô hình mối đe dọa
+``pod bị chiếm''), rồi đặt sự kiện vào bộ đệm vòng. Mã
+nguồn~\ref{lst:bpf-kretprobe} trích phần lõi của \texttt{kretprobe}.
+
+\begin{lstlisting}[language=C,caption={Trích \texttt{kretprobe}: đọc socket bằng CO-RE, lọc nguồn theo LPM, đẩy sự kiện qua ring buffer (\texttt{tcp\_connect.bpf.c}).},label={lst:bpf-kretprobe}]
+SEC("kretprobe/tcp_v4_connect")
+int BPF_KRETPROBE(tcp_v4_connect_return, int ret)
+{
+    if (ret != 0 && ret != -115)   // chi xu ly connect() thanh cong / EINPROGRESS
+        return 0;
+    __u64 pid_tgid = bpf_get_current_pid_tgid();
+    struct sock **skp = bpf_map_lookup_elem(&sock_store, &pid_tgid);
+    if (!skp) return 0;
+    struct sock *sk = *skp;
+    bpf_map_delete_elem(&sock_store, &pid_tgid);
+
+    __u32 dst_ip = 0, src_ip = 0; __u16 dst_port = 0;
+    BPF_CORE_READ_INTO(&dst_ip,  sk, __sk_common.skc_daddr);
+    BPF_CORE_READ_INTO(&dst_port, sk, __sk_common.skc_dport);
+    BPF_CORE_READ_INTO(&src_ip,  sk, __sk_common.skc_rcv_saddr);
+    dst_port = __builtin_bswap16(dst_port);
+
+    // Loc nguon: chi phat su kien neu nguon thuoc mang pod (nhan == 1).
+    struct lpm_key src_key = { .prefixlen = 32, .addr = src_ip };
+    __u32 *src_label = bpf_map_lookup_elem(&cidr_map, &src_key);
+    if (!src_label || *src_label != 1)
+        return 0;
+
+    struct network_event_t *evt = bpf_ringbuf_reserve(&events, sizeof(*evt), 0);
+    if (!evt) return 0;
+    evt->src_ip = src_ip; evt->dst_ip = dst_ip; evt->dst_port = dst_port;
+    evt->pid = pid_tgid >> 32;
+    evt->timestamp_ns = bpf_ktime_get_ns();
+    bpf_ringbuf_submit(evt, 0);
+    return 0;
+}
+\end{lstlisting}
+
+Việc lọc nguồn ngay trong nhân là một quyết định thiết kế quan trọng: nó loại bỏ phần
+lớn lưu lượng không liên quan (kết nối do chính node phát đi, lưu lượng host) \emph{tại
+nguồn}, giảm số sự kiện phải truyền lên không gian người dùng và~--~như phân tích ở
+Chương~\ref{ch:eval}~--~giảm đáng kể tỷ lệ báo động giả. Đường đi đầy đủ của một gói
+tin từ lời gọi \texttt{connect()} tới khi thành sự kiện ở không gian người dùng được
+mô tả ở Hình~\ref{fig:packet-event-path}.
+
+\begin{figure}[H]
+  \centering
+  \resizebox{0.9\linewidth}{!}{\input{../shared/figures/packet-event-path}}
+  \caption{Đường đi của một sự kiện kết nối qua eBPF.}
+  \label{fig:packet-event-path}
+\end{figure}
+
+\subsection{Chương trình tầng người dùng}
+\label{subsec:impl-user}
+
+Phần tầng người dùng (\texttt{collector.cpp}) dùng \texttt{libbpf} để: mở tệp đối
+tượng \texttt{tcp\_connect.bpf.o}, nạp vào nhân, gắn \texttt{kprobe}/\texttt{kretprobe},
+\emph{nạp bảng CIDR} vào \texttt{cidr\_map}, rồi vào vòng lặp đọc bộ đệm vòng. Bảng
+CIDR (Mã nguồn~\ref{lst:user-cidr}) chính là tri thức để chương trình tầng nhân phân
+loại địa chỉ; mỗi mục là cặp (tiền tố, nhãn) với địa chỉ ở thứ tự byte mạng.
+
+\begin{lstlisting}[language=C++,caption={Nạp bảng CIDR vào \texttt{LPM\_TRIE} từ tầng người dùng (\texttt{collector.cpp}).},label={lst:user-cidr}]
+struct { struct lpm_key key; uint32_t label; const char *desc; } entries[] = {
+    { {16, htonl(0x0AF40000)}, 1, "pod_network" },     // 10.244.0.0/16
+    { {12, htonl(0x0A600000)}, 2, "service_network" },  // 10.96.0.0/12
+    { {16, htonl(0xC0A80000)}, 3, "node_network" },     // 192.168.0.0/16
+    { {12, htonl(0xAC100000)}, 4, "private_172" },      // 172.16.0.0/12
+    { {8,  htonl(0x7F000000)}, 5, "loopback" },         // 127.0.0.0/8
+};
+for (const auto &e : entries)
+    bpf_map_update_elem(map_fd, &e.key, &e.label, BPF_ANY);
+\end{lstlisting}
+
+Mỗi sự kiện đọc được từ bộ đệm vòng được chuyển con trỏ qua hàm callback
+\texttt{handle\_event}, ở đó địa chỉ nhị phân được đổi sang chuỗi chấm-thập phân và in
+ra \texttt{stdout} dưới dạng một dòng JSON (ví dụ
+\texttt{\{"src\_ip":"10.244.1.5", "dst\_port":8080, \dots\}}). Vòng
+lặp chính gọi \texttt{ring\_buffer\_\_poll} với chu kỳ 100~ms và thoát sạch khi nhận
+tín hiệu \texttt{SIGINT}/\texttt{SIGTERM}. Việc xuất JSON theo dòng giúp giữ giao diện
+\emph{đơn giản và thay thế được}: pipeline chỉ cần đọc \texttt{stdin}, không phụ thuộc
+vào thư viện eBPF.
+
+\subsection{Đóng gói và triển khai}
+\label{subsec:impl-collector-deploy}
+
+Để chạy được trên cụm có nhân không đồng nhất, ảnh Docker của bộ thu thập sinh tệp
+\texttt{vmlinux.h} từ thông tin BTF của nhân ngay trong quá trình xây dựng, hiện thực
+hóa cơ chế CO-RE đã trình bày ở Chương~\ref{ch:foundations}. Bộ thu thập được triển
+khai dưới dạng \texttt{DaemonSet} \emph{đặc quyền} để hiện diện trên mọi node. Trong
+cùng pod, ba container chạy cạnh nhau và nối với nhau qua một FIFO trên
+\texttt{emptyDir}: \texttt{collector} ghi JSON vào FIFO, \texttt{pipeline} đọc FIFO
+qua \texttt{stdin}, còn \texttt{alert-bridge} đẩy cảnh báo lên NATS. Mã
+nguồn~\ref{lst:collector-ds} trích phần khai báo container thu thập, bao gồm cơ chế
+tự khởi động lại và \texttt{securityContext} đặc quyền.
+
+\begin{lstlisting}[language={},caption={Trích \texttt{DaemonSet} thu thập: tạo FIFO, vòng tự khởi động lại, quyền đặc quyền nạp eBPF (\texttt{23-pipeline-ebpf.yaml}).},label={lst:collector-ds}]
+- name: collector
+  image: johnnaeder/ebpf-portscan-k8s-check:collector-ebpf-s3
+  command: ["/bin/sh", "-c"]
+  args:
+    - |
+      FIFO=/stream/events.pipe
+      [ -p "$FIFO" ] || mkfifo -m 0600 "$FIFO"
+      while true; do
+        /app/collector > "$FIFO" || echo "[ebpf] collector exited $?" >&2
+        sleep 3
+      done
+  volumeMounts:
+    - { name: stream, mountPath: /stream }
+    - { name: btf,    mountPath: /sys/kernel/btf, readOnly: true }
+  securityContext:
+    privileged: true        # can de nap + attach BPF, doc kernel BTF
+\end{lstlisting}
+
+Vì \texttt{collector} chạy đặc quyền và nạp mã eBPF vào nhân, đây là thành phần có quyền
+cao hơn hẳn ứng dụng thường, nên tôi đặt nó vào một ranh giới tin cậy riêng và làm cứng
+tách biệt; phần phân tích mô hình tin cậy và các biện pháp làm cứng được trình bày cùng
+với các giới hạn an ninh ở mục~\ref{sec:eval-trust} (Chương~\ref{ch:eval}).
+
+\subsection{Kiểm chứng eBPF hoạt động ở tầng nhân}
+\label{subsec:impl-collector-verify}
+
+Vì can thiệp tầng nhân là trọng tâm của đồ án, cần một cách \emph{quan sát trực tiếp}
+chứng minh chương trình eBPF đã thực sự được nạp, kiểm chứng và gắn vào ngăn xếp mạng
+của nhân~--~chứ không chỉ là một tiến trình người dùng thông thường. Việc kiểm chứng dựa
+trên \texttt{bpftool} (truy vấn trạng thái BPF của nhân) và giao diện tracing của nhân,
+gồm ba bước minh chứng độc lập (Mã nguồn~\ref{lst:bpf-verify}).
+
+\emph{Thứ nhất}, \texttt{bpftool prog show} liệt kê chương trình đang nạp: kiểu
+\texttt{kprobe} gắn vào hàm \texttt{tcp\_v4\_connect}~--~đúng điểm móc đã chọn ở
+Chương~\ref{ch:foundations}~--~kèm số lệnh đã được trình kiểm chứng (verifier) duyệt và
+đã biên dịch JIT, khẳng định mã chạy \emph{trong} nhân chứ không phải trong không gian
+người dùng. \emph{Thứ hai}, \texttt{bpftool map show} liệt kê đúng ba bản đồ BPF mà bộ
+thu thập sử dụng: \texttt{cidr\_map} kiểu \texttt{lpm\_trie} (lọc dải pod-network),
+\texttt{events} kiểu \texttt{ringbuf} (kênh chuyển sự kiện lên không gian người dùng) và
+\texttt{sock\_store} kiểu \texttt{hash} (ghép pha vào/ra của \texttt{connect}).
+\emph{Thứ ba}, đổ nội dung \texttt{cidr\_map} xác nhận các CIDR pod-network đã được nạp,
+và đọc luồng sự kiện cho thấy mỗi lời gọi \texttt{connect()} trong cụm sinh đúng một bản
+ghi sự kiện~--~tức là cơ chế tracing đang chạy theo thời gian thực.
+
+\begin{lstlisting}[language={},caption={Kiểm chứng chương trình và bản đồ eBPF ở tầng nhân (chạy \texttt{bpftool} trên node).},label={lst:bpf-verify}]
+# (1) Hai chuong trinh eBPF da nap: kprobe + kretprobe gan tcp_v4_connect, da JIT
+$ sudo bpftool prog show
+97069: kprobe  name tcp_v4_connect_entry   gpl  run_cnt 101167
+        xlated 112B  jited 72B   memlock 4096B  map_ids 19041              btf_id 3973
+97070: kprobe  name tcp_v4_connect_return  gpl  run_cnt 101167
+        xlated 760B  jited 412B  memlock 4096B  map_ids 19041,19039,19040  btf_id 3973
+
+# (2) Ba ban do BPF cua bo thu thap
+$ sudo bpftool map show
+19039: lpm_trie  name cidr_map    flags 0x1  key 8B  value 4B  max_entries 1024
+19040: ringbuf   name events      flags 0x0                    max_entries 262144
+19041: hash      name sock_store  flags 0x0  key 8B  value 8B  max_entries 4096
+
+# (3) Cac CIDR pod-network da nap vao bo loc LPM
+$ sudo bpftool map dump name cidr_map | head
+[{ "key": { "prefixlen": 12, "addr": 24586 }, "value": 2 },
+ { "key": { "prefixlen": 16, "addr": 62474 }, "value": 1 }]
+
+# (4) Tracing thoi gian thuc: moi connect() sinh mot su kien JSON tren collector stdout
+$ kubectl -n zt-mapper logs zt-pipeline-ebpf-tx94l -c collector --tail=1
+{"src":"10.244.204.189","dst":"10.244.204.161","dport":80,"src_label":1}
+\end{lstlisting}
+
+Bốn đầu ra trên là minh chứng đầy đủ cho chuỗi ``nạp~$\rightarrow$~kiểm chứng~$\rightarrow$
+JIT~$\rightarrow$~gắn móc~$\rightarrow$~bắt sự kiện'' diễn ra ở tầng nhân.
+Hình~\ref{fig:ebpf-bpftool} là ảnh chụp đầu ra \texttt{bpftool} thật trên node
+\texttt{userver-worker-1}: hai chương trình \texttt{kprobe}/\texttt{kretprobe} gắn vào
+\texttt{tcp\_v4\_connect} (đã \texttt{xlated}/\texttt{jited}, số lần chạy \texttt{run\_cnt}
+hơn $10^5$) và đúng ba bản đồ \texttt{cidr\_map} (\texttt{lpm\_trie}), \texttt{events}
+(\texttt{ringbuf}), \texttt{sock\_store} (\texttt{hash}). Quy trình chạy lại đầy đủ được
+tổng hợp trong Phụ lục~\ref{app:demo}.
+
+\begin{figure}[H]
+  \centering
+  \IfFileExists{assets/images/ebpf-bpftool.png}{%
+    \includegraphics[width=0.92\linewidth]{ebpf-bpftool}}{%
+    \fbox{\parbox[c][3.2cm][c]{0.8\linewidth}{\centering\itshape\small
+    [Ảnh chụp đầu ra \texttt{bpftool} trên node --- lưu vào
+    \texttt{stage2/assets/images/ebpf-bpftool.png}]}}}
+  \caption{Minh chứng eBPF ở tầng nhân qua \texttt{bpftool} trên node.}
+  \label{fig:ebpf-bpftool}
+\end{figure}
+
+\section{Bộ máy pipeline}
+\label{sec:impl-pipeline}
+
+Bộ máy pipeline (\texttt{engine.cpp} + thư viện \texttt{libdsa}) là nơi đặt các thuật
+toán phát hiện. Kiến trúc của nó (Hình~\ref{fig:comp-collect-pipe}, phải) gồm một bộ
+\emph{sổ đăng ký} (Registry) dựng các thuật toán theo tên trong cấu hình, và một vòng
+lặp xử lý sự kiện đọc từ \texttt{stdin}.
+
+\subsection{Cấu hình theo dữ liệu}
+\label{subsec:impl-pipeline-config}
+
+Toàn bộ hành vi phát hiện~--~kích thước Count-Min Sketch, ngưỡng, độ dài cửa sổ, danh
+sách dải mạng phân loại, luật mức độ nghiêm trọng~--~đều khai báo trong một tệp YAML
+nạp vào pod qua \texttt{ConfigMap} (Mã nguồn~\ref{lst:pipeline-cfg}), nên có thể điều
+chỉnh mà không cần biên dịch lại. Đây cũng là nơi định nghĩa ánh xạ CIDR $\rightarrow$
+nhãn mà pipeline dùng cho phân loại LPM ở tầng người dùng (song song với bảng trong
+nhân của bộ thu thập).
+
+\begin{lstlisting}[language={},caption={Trích cấu hình pipeline: thuật toán, ngưỡng, dải mạng, cửa sổ phân tích (\texttt{pipeline.yaml}).},label={lst:pipeline-cfg}]
+algorithms:
+  frequency_estimator: { name: count_min_sketch, params: { width: 2048, depth: 5, threshold: 40 } }
+  scc_detector:        { name: tarjan }
+  reachability:        { name: bfs, params: { max_hops: 3 } }
+  ip_classifier:       { name: lpm_trie }
+networks:
+  - { cidr: "10.244.0.0/16", label: 1, name: pod_network }
+  - { cidr: "10.96.0.0/12",  label: 2, name: service_network }
+  - { cidr: "0.0.0.0/0",     label: 0, name: external }
+analysis: { window_seconds: 60, scc_interval_seconds: 10 }
+severity_rules:
+  - { type: port_scan,    severity: medium }
+  - { type: blast_radius, severity: high }
+\end{lstlisting}
+
+\subsection{Vòng lặp xử lý sự kiện}
+\label{subsec:impl-pipeline-loop}
+
+Với mỗi sự kiện, vòng lặp thực hiện một chuỗi bước cố định (Giải
+thuật~\ref{alg:pipeline-loop}): kiểm tra và đặt lại cửa sổ trượt; phân loại địa chỉ
+bằng LPM; cập nhật bộ đếm Count-Min Sketch \emph{theo địa chỉ nguồn} và ước lượng tần
+suất; nếu vượt ngưỡng thì phát cảnh báo \texttt{port\_scan} (mỗi nguồn chỉ một lần
+trong cửa sổ) và tính \emph{bán kính ảnh hưởng} bằng BFS $k$~bước để phát cảnh báo
+\texttt{blast\_radius}; bồi đắp đồ thị truyền thông; và định kỳ chạy Tarjan để phát
+hiện thành phần liên thông mạnh (\texttt{scc\_anomaly}). Lưu đồ tương ứng ở
+Hình~\ref{fig:detect-flow-impl}.
+
+\begin{lstlisting}[style=pseudo,caption={Vòng lặp xử lý sự kiện của pipeline (rút gọn từ \texttt{engine.cpp}).},label={alg:pipeline-loop}]
+for each event e read from stdin:
+    if e.ts - window_start > window_seconds: reset CMS; clear alerted; window_start = e.ts
+    src_label = lpm.lookup(e.src_ip)            // phan loai dia chi nguon
+    cms.record(e.src_ip); freq = cms.estimate(e.src_ip)
+    if freq > threshold and e.src_ip not in alerted:
+        alerted.add(e.src_ip); emit Alert("port_scan", e.src_ip, freq)
+        if graph.has(e.src_ip):
+            blast = bfs.reachable_within(graph, e.src_ip, max_hops)
+            emit Alert("blast_radius", e.src_ip, blast)
+    graph.add_edge(e.src_ip, e.dst_ip)          // boi dap do thi truyen thong
+    if total_events % (scc_interval*10) == 0:
+        sccs = tarjan.find_sccs(graph)
+        if new_nontrivial_scc(sccs): emit Alert("scc_anomaly", scc)
+\end{lstlisting}
+
+\begin{figure}[H]
+  \centering
+  \resizebox{0.62\linewidth}{!}{\input{../shared/figures/detect-flow}}
+  \caption{Lưu đồ xử lý một sự kiện trong pipeline.}
+  \label{fig:detect-flow-impl}
+\end{figure}
+
+Ở đây tôi đặt cả phân tích \emph{tần suất} (CMS) lẫn phân tích \emph{đồ thị}
+(Tarjan SCC, BFS bán kính ảnh hưởng) \emph{ngay trong pipeline mỗi node}, chứ
+không phải ở tầng tổng hợp. Tầng tổng hợp (mục~\ref{sec:impl-soc}) chỉ làm tương quan
+và khử trùng lặp cảnh báo trên phạm vi toàn cụm.
+
+\subsection{Phát cảnh báo}
+\label{subsec:impl-pipeline-alert}
+
+Cảnh báo được gửi qua một \emph{chuỗi xử lý} (\texttt{AlertHandlerChain}) cấu hình
+được: handler ghi tệp \texttt{alerts.json} (NDJSON) và handler ghi \texttt{stderr}.
+Mỗi cảnh báo mang đủ ngữ cảnh để SOC xử lý về sau: loại, nguồn, mức nghiêm trọng,
+\texttt{node\_name}, \texttt{namespace}, nhãn và phần \texttt{details} dạng JSON (ví dụ
+tần suất ước lượng, ngưỡng, danh sách đích trong bán kính ảnh hưởng). Mã
+nguồn~\ref{lst:pipeline-emit} trích đoạn phát cảnh báo \texttt{port\_scan}.
+
+\begin{lstlisting}[language=C++,caption={Phát cảnh báo \texttt{port\_scan} khi vượt ngưỡng (rút gọn từ \texttt{engine.cpp}).},label={lst:pipeline-emit}]
+if (freq > threshold && alerted_sources.find(evt.src_ip) == alerted_sources.end()) {
+    alerted_sources.insert(evt.src_ip);
+    dsa::soc::Alert alert;
+    alert.type      = "port_scan";
+    alert.source    = ip_to_string(evt.src_ip);
+    alert.severity  = severity_for(alert.type, cfg.severity_rules);
+    alert.node_name = node_name;       // tu Downward API (NODE_NAME)
+    alert.tags      = {"port_scan"};
+    chain.send(alert);                 // -> alerts.json -> alert-bridge -> NATS
+}
+\end{lstlisting}
+
+Container sidecar \texttt{alert-bridge} (Go) theo dõi đuôi tệp \texttt{alerts.json},
+mỗi dòng mới được nó publish lên chủ đề NATS \texttt{zt.alerts.raw}. Tách phần đẩy NATS
+ra một tiến trình Go riêng giúp bộ máy C++ không phải liên kết \texttt{libnats}, đồng
+thời cho phép siết quyền sidecar tối đa (phân tích ở mục~\ref{sec:eval-trust}).
+
+\section{Trung tâm vận hành an ninh (SOC)}
+\label{sec:impl-soc}
+
+SOC nhận cảnh báo thô từ các node, tương quan thành sự cố, làm giàu ngữ cảnh
+Kubernetes, sinh chính sách cách ly và phục vụ người vận hành. Dòng chảy thông điệp:
+pipeline mỗi node $\xrightarrow{\texttt{zt.alerts.raw}}$ \emph{aggregator}
+$\xrightarrow{\texttt{zt.alerts.enriched}}$ \emph{incident-service}
+$\rightarrow$ PostgreSQL $\rightarrow$ \emph{web-console}.
+
+\subsection{Bộ tổng hợp (aggregator)}
+\label{subsec:impl-aggregator}
+
+Bộ tổng hợp (Hình~\ref{fig:comp-agg-bridge}, trái) đăng ký \texttt{zt.alerts.raw} theo
+\emph{queue group} (để chạy nhiều bản sao mà không trùng lặp), đưa mỗi cảnh báo qua bộ
+\emph{tương quan} (\texttt{Correlator}) rồi tái phát những cảnh báo đáng phát lên
+\texttt{zt.alerts.enriched}. Khóa tương quan là \texttt{incident\_key = type|source};
+hai cảnh báo cùng khóa trong cửa sổ thời gian được coi là cùng một sự cố. Logic cốt
+lõi (Mã nguồn~\ref{lst:agg-correlate}): cảnh báo \emph{đầu tiên} của một khóa được phát
+ngay; các cảnh báo lặp bị \emph{nén}; nhưng đúng thời điểm cùng một nguồn xuất hiện
+trên node thứ hai (\emph{cross-node}), mức nghiêm trọng được \emph{nâng cấp} và cảnh
+báo được tái phát kèm nhãn \texttt{cross\_node\_attacker}. Đây chính là góc nhìn
+``toàn cụm'' của hệ thống~--~đạt được bằng tương quan cảnh báo, không phải bằng một đồ
+thị toàn cục.
+
+\begin{lstlisting}[language=Go,caption={Tương quan và nâng cấp cross-node trong aggregator (rút gọn từ \texttt{correlator.go}).},label={lst:agg-correlate}]
+key := a.Type + "|" + a.Source
+st, exists := c.incidents[key]
+if !exists || now-st.LastSeenNS > c.Window.Nanoseconds() {
+    st = &incidentState{Key: key, FirstSeenNS: now, LastSeenNS: now, Count: 1, ...}
+    c.incidents[key] = st
+    return a, true                       // lan dau -> phat ngay
+}
+prevCrossNode := len(st.Nodes) >= 2
+st.LastSeenNS = now; st.Count++; st.Nodes[a.NodeName] = struct{}{}
+if !prevCrossNode && len(st.Nodes) >= 2 {  // vua thanh cross-node
+    a.Severity = upgradeSeverity(a.Severity)
+    a.Tags = appendUnique(a.Tags, "cross_node_attacker")
+    return a, true                       // nang cap -> tai phat
+}
+return nil, false                        // trung lap -> nen
+\end{lstlisting}
+
+\subsection{Dịch vụ sự cố (incident-service)}
+\label{subsec:impl-incident}
+
+Dịch vụ sự cố (Hình~\ref{fig:comp-inc-console}, trái) là thành phần phức tạp nhất của
+SOC, gồm năm gói nội bộ: \texttt{natssub} (tiêu thụ cảnh báo), \texttt{store}
+(PostgreSQL), \texttt{response} (sinh \texttt{NetworkPolicy} và thao tác pod),
+\texttt{api} (REST) và \texttt{rbac}/\texttt{audit} (phân quyền và kiểm toán).
+
+\paragraph{Tiêu thụ cảnh báo và làm giàu.} Bộ tiêu thụ (Mã nguồn~\ref{lst:inc-sub})
+\emph{upsert} mỗi cảnh báo enriched thành sự cố theo \texttt{incident\_key}: nếu chưa
+có thì tạo mới, nếu có thì cập nhật \texttt{last\_seen}/số lần/nodes/mức nghiêm trọng.
+Với sự cố mới, tôi cho dịch vụ thực hiện hai việc: (i)~\emph{làm giàu ngữ cảnh
+Kubernetes}~--~tra cứu pod nào đang giữ địa chỉ nguồn (\texttt{LookupPodByIP} duyệt
+\texttt{status.PodIP}) rồi lưu kèm tên pod/namespace, để người vận hành thấy ngay danh
+tính kẻ tấn công thay vì chỉ một địa chỉ IP; (ii)~\emph{tự sinh hành động} khi mức
+nghiêm trọng thuộc \{high, critical\}~--~tạo bản nháp \texttt{NetworkPolicy} ở trạng
+thái \texttt{pending} chờ duyệt.
+
+\begin{lstlisting}[language=Go,caption={Tiêu thụ cảnh báo: upsert sự cố, làm giàu pod, tự sinh hành động (rút gọn từ \texttt{subscriber.go}).},label={lst:inc-sub}]
+inc, created, _ := st.UpsertIncident(ctx, &inAlert)
+st.AppendAlert(ctx, inc.ID, msg.Data)
+if created && resolver != nil {                       // lam giau ngu canh K8s
+    if name, found, _ := resolver.LookupPodByIP(ctx, ns, inc.SourceIP); found {
+        st.SetIncidentPodContext(ctx, inc.ID, name, ns)
+    }
+}
+if _, ok := autoSet[inc.Severity]; ok {               // high|critical -> sinh nhap chinh sach
+    yaml := response.GenerateQuarantine(response.QuarantineRequest{
+        IncidentID: inc.ID, SourceIP: inc.SourceIP, Severity: inc.Severity})
+    st.CreateAction(ctx, &store.Action{IncidentID: inc.ID, Type: "quarantine_pod", YAMLDraft: yaml})
+}
+\end{lstlisting}
+
+\paragraph{Lưu trữ.} Trạng thái được giữ trong PostgreSQL qua bốn bảng~--~\texttt{incidents},
+\texttt{alerts}, \texttt{actions}, \texttt{audit\_log}~--~mà lược đồ chi tiết đã trình
+bày ở ERD Chương~\ref{ch:design}. Tôi gộp các lần xuất hiện lặp của cùng một sự cố bằng
+phép \emph{upsert} \texttt{INSERT ... ON CONFLICT (incident\_key) DO UPDATE}, dựa trên
+ràng buộc duy nhất trên \texttt{incident\_key} (Mã nguồn~\ref{lst:sql-upsert}); migration
+được nhúng vào nhị phân và áp tự động khi khởi động.
+
+\begin{lstlisting}[language=SQL,caption={Lược đồ bảng \texttt{incidents} và khóa duy nhất dùng cho upsert (\texttt{001\_init.sql}).},label={lst:sql-upsert}]
+CREATE TABLE IF NOT EXISTS incidents (
+    id               BIGSERIAL PRIMARY KEY,
+    incident_key     TEXT NOT NULL,                 -- type|source: khoa khu trung lap
+    type             TEXT NOT NULL,
+    source_ip        TEXT NOT NULL,
+    severity         TEXT NOT NULL DEFAULT 'medium',
+    status           TEXT NOT NULL DEFAULT 'new',   -- new|ack|resolved|suppressed
+    nodes_observed   TEXT[] NOT NULL DEFAULT '{}',
+    occurrence_count INT  NOT NULL DEFAULT 1,
+    cross_node       BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (incident_key)
+);
+\end{lstlisting}
+
+\paragraph{Sinh và áp chính sách cách ly.} Bộ sinh phản hồi (\texttt{response}) tạo
+\texttt{NetworkPolicy} dạng \emph{chặn mọi lưu lượng đi ra} (egress-deny) gắn lên đúng
+pod tấn công qua một nhãn theo sự cố. Khi hiện thực bước này tôi gặp một vấn đề kỹ
+thuật quan trọng: vì ngữ nghĩa \texttt{NetworkPolicy} là \emph{cộng dồn}
+(một kết nối được phép nếu \emph{bất kỳ} policy nào cho phép), nên kiểu ``cho phép mọi
+nguồn trừ kẻ tấn công'' sẽ bị các luật cho-phép rộng khác vô hiệu hóa; ngược lại, chặn
+\emph{egress của chính pod tấn công} thì không policy ingress nào ghi đè được, và dừng
+được cả quét cổng lẫn dịch chuyển ngang tại nguồn. Cơ chế áp dụng theo
+\emph{có người duyệt}: khi admin phê duyệt, hệ thống mới gắn nhãn cách ly lên pod
+(\texttt{QuarantinePodByIP}) rồi áp policy qua API Kubernetes. Toàn bộ luồng này được
+tóm tắt ở Hình~\ref{fig:flow-netpol}, còn bản nháp sinh ra có dạng Mã
+nguồn~\ref{lst:netpol}.
+
+\begin{figure}[H]
+  \centering
+  \resizebox{0.92\linewidth}{!}{\input{../shared/figures/flow-netpol}}
+  \caption{Lưu đồ sinh và áp \texttt{NetworkPolicy} cách ly.}
+  \label{fig:flow-netpol}
+\end{figure}
+
+\begin{lstlisting}[language={},caption={Bản nháp \texttt{NetworkPolicy} egress-deny sinh tự động cho pod tấn công.},label={lst:netpol}]
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: zt-quarantine-incident-<id>
+  namespace: zt-targets
+spec:
+  podSelector:
+    matchLabels:
+      zt-soc-quarantine-<id>: "true"   # pod tan cong, dan nhan boi enforcer
+  policyTypes: [Egress]
+  egress: []                           # chan TOAN BO luu luong di ra cua pod do
+\end{lstlisting}
+
+\paragraph{API, phân quyền và kiểm toán.} Dịch vụ phơi bày REST API (router
+\texttt{chi}) với phân quyền theo vai trò ba mức~--~\texttt{viewer} (chỉ đọc),
+\texttt{editor} (ghi nhận/đóng sự cố), \texttt{admin} (phê duyệt/bác bỏ phản hồi). Phân
+quyền hiện thực bằng middleware xác thực Bearer token và bộ chặn \texttt{RequireRole}
+theo bậc thang \texttt{admin > editor > viewer} (Mã nguồn~\ref{lst:rbac}). Mọi thao
+tác làm thay đổi trạng thái~--~tạo sự cố, đổi trạng thái, sinh/duyệt/bác bỏ hành
+động~--~đều được ghi vào bảng \texttt{audit\_log} kèm chủ thể, vai trò và phần
+\texttt{diff}, phục vụ truy vết và xuất báo cáo tuân thủ.
+
+\begin{lstlisting}[language=Go,caption={Định tuyến có phân quyền: phê duyệt hành động yêu cầu vai trò \texttt{admin} (rút gọn từ \texttt{api.go}, \texttt{rbac.go}).},label={lst:rbac}]
+r.Use(rbac.Middleware(tokens))                                  // xac thuc Bearer token
+r.Route("/api/v1/actions", func(r chi.Router) {
+    r.Get("/", s.listActions)                                   // viewer doc duoc
+    r.With(rbac.RequireRole(rbac.RoleAdmin)).Post("/{id}/approve", s.approveAction)
+    r.With(rbac.RequireRole(rbac.RoleAdmin)).Post("/{id}/reject",  s.rejectAction)
+})
+// RequireRole: admin(3) > editor(2) > viewer(1)
+func RequireRole(min Role) func(http.Handler) http.Handler { /* tu choi neu rank < min */ }
+\end{lstlisting}
+
+\subsection{Console web}
+\label{subsec:impl-console}
+
+Console web (Hình~\ref{fig:comp-inc-console}, phải) là một giao diện mỏng Flask~+~HTMX
+đặt trước REST API của dịch vụ sự cố. Nó liệt kê sự cố và hành động đang chờ, cho phép
+admin phê duyệt/bác bỏ \texttt{NetworkPolicy} ngay tại dòng (HTMX thay từng hàng mà
+không tải lại trang), và xem báo cáo tuần. Về bảo mật, console xác thực người dùng bằng
+Basic Auth, còn khi gọi xuống API thì dùng \emph{token admin phía máy chủ}
+(\texttt{RBAC\_ADMIN\_TOKEN})~--~trình duyệt không bao giờ giữ token API. Đây là một
+proxy có chủ đích: tách phần xác thực người dùng khỏi phần phân quyền API.
+
+\section{Ứng dụng và giao diện vận hành (chạy thật)}
+\label{sec:impl-app}
+
+Mục này trình bày ứng dụng \emph{chạy thật} trên cụm, phân biệt với phần thiết kế giao
+diện (mockup) ở Chương~\ref{ch:design}. Console phục vụ trọn vòng xử lý sự cố: người
+vận hành thấy danh sách sự cố có thể lọc/sắp xếp, mở chi tiết một sự cố để xem siêu dữ
+liệu đã làm giàu (gồm pod nguồn), các cảnh báo liên quan và bản nháp chính sách cách
+ly, rồi ghi nhận hoặc phê duyệt tùy vai trò. Song song, dashboard Grafana cung cấp góc
+nhìn kỹ thuật theo thời gian thực về số lượng cảnh báo, dòng thời gian sự cố và các
+nguồn hoạt động mạnh nhất.
+
+Console được phục vụ tại \texttt{console.zt.local} qua ingress của cụm. Màn hình
+\emph{Pending actions} (Hình~\ref{fig:console-actions}) là hàng đợi phê duyệt: mỗi dòng
+là một bản nháp hành động (chủ yếu \texttt{quarantine\_pod}) do dịch vụ sự cố tự sinh từ
+cảnh báo mức cao, kèm hai nút \emph{Approve}/\emph{Reject}~--~hiện thực hóa điểm dừng
+\emph{có người trong vòng lặp}. Tại thời điểm chụp, console liệt kê $38$ hành động đang
+chờ, đúng bằng số sự cố mức \texttt{high}/\texttt{critical} đang lưu trong cơ sở dữ liệu.
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=\linewidth]{console-actions}
+  \caption{Hàng đợi phê duyệt hành động trên console.}
+  \label{fig:console-actions}
+\end{figure}
+
+Mở chi tiết một sự cố (Hình~\ref{fig:incident-detail}) cho thấy toàn bộ ngữ cảnh đã làm
+giàu: địa chỉ nguồn, mức nghiêm trọng, các node quan sát được, cờ \emph{cross-node}, số
+lần tái phát, mốc thời gian đầu/cuối, danh sách hành động, biểu mẫu thao tác tầng~2 và
+\emph{nhật ký kiểm toán}. Ví dụ sự cố \texttt{blast\_radius} mức \texttt{critical} từ
+nguồn \texttt{100.119.246.28} được quan sát đồng thời trên hai node
+(\texttt{userver-master}, \texttt{userver-worker-home}) nên được nâng mức và đánh dấu
+cross-node.
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=\linewidth]{incident-detail}
+  \caption{Chi tiết một sự cố với ngữ cảnh đã làm giàu và nhật ký kiểm toán.}
+  \label{fig:incident-detail}
+\end{figure}
+
+Sau khi quản trị viên phê duyệt, hành động chuyển trạng thái \texttt{executed} và đối
+tượng \texttt{NetworkPolicy} tương ứng được áp vào cụm~--~Hình~\ref{fig:incident-enforced}
+ghi lại dòng \texttt{networkpolicy.networking.k8s.io/zt-quarantine-incident-4} đã được áp
+trong không gian tên \texttt{zt-targets}, minh chứng vòng phản hồi đã khép kín tới tầng
+thực thi.
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=\linewidth]{incident-enforced}
+  \caption{Hành động cách ly đã được áp (\texttt{executed}) sau phê duyệt.}
+  \label{fig:incident-enforced}
+\end{figure}
+
+Trang \emph{Reports} tổng hợp báo cáo tuần đọc trực tiếp từ PostgreSQL
+(Hình~\ref{fig:weekly-report}): tiêu đề kỳ, tổng số sự cố, phân bố theo mức nghiêm trọng
+và bảng nguồn tấn công nhiều nhất, kèm nút \emph{Generate \& upload to MinIO} để kết
+xuất và lưu trữ báo cáo. Đây cũng là nơi thể hiện rõ rằng số liệu hiển thị trên
+console/Reports là \emph{số liệu thật} tích lũy trong cơ sở dữ liệu, không phải dữ liệu
+dựng sẵn.
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=\linewidth]{weekly-report}
+  \caption{Trang báo cáo tuần kết xuất từ cơ sở dữ liệu.}
+  \label{fig:weekly-report}
+\end{figure}
+
+\paragraph{Về đường dữ liệu của dashboard Grafana.} Cần phân biệt hai nguồn dữ liệu
+khác nhau. Console/Reports đọc \emph{trực tiếp} PostgreSQL~--~\emph{hệ thống lưu trữ bền
+vững} tích lũy mọi sự cố từ trước tới nay (Hình~\ref{fig:weekly-report}). Trong khi đó
+các dashboard Grafana là \emph{góc nhìn quan trắc theo cửa sổ thời gian}: bảng
+\emph{Alerts Overview} truy vấn nhật ký trong Loki theo cửa sổ mặc định $30$~phút, còn
+bảng \emph{Incidents \& Actions} truy vấn các bộ đếm Prometheus của dịch vụ SOC. Do đó
+dashboard chỉ phản ánh hoạt động \emph{gần đây} và đòi hỏi (i)~có lưu lượng tấn công
+trong cửa sổ đang xem, và (ii)~các bộ đếm Prometheus phải được thu thập. Hệ quả của sự
+khác biệt nguồn dữ liệu này~--~và cấu hình thu thập tương ứng~--~được bàn kỹ hơn ở
+mục giới hạn của Chương~\ref{ch:eval}.
+
+Sau khi khai báo \texttt{ServiceMonitor} cho các dịch vụ SOC, Prometheus thu thập đúng
+hai mục tiêu \texttt{zt-aggregator:9100} và \texttt{zt-incident-service:9101}; hai
+dashboard \emph{ZT-SOC Overview} và \emph{ZT-SOC Incidents}
+(Hình~\ref{fig:grafana-overview} và~\ref{fig:grafana-incidents}) hiển thị các chỉ số như
+số sự cố đang hoạt động, sự cố cross-node, tốc độ nhận cảnh báo và tốc độ tạo sự cố. Do
+các panel dạng \emph{rate} phản ánh \emph{biến thiên} của bộ đếm, đường biểu diễn chỉ
+nhô lên khi có lưu lượng tấn công \emph{ngay trong cửa sổ thời gian đang xem}; vì vậy ảnh
+chụp được lấy bằng cách thu hẹp cửa sổ (vài phút), bật tự làm mới và chạy kịch bản tấn
+công (Phụ lục~\ref{app:demo-attack}) ngay trước khi quan sát.
+
+\begin{figure}[H]
+  \centering
+  \IfFileExists{assets/images/grafana-overview.png}{%
+    \includegraphics[width=\linewidth]{grafana-overview}}{%
+    \fbox{\parbox[c][2.6cm][c]{0.8\linewidth}{\centering\itshape\small
+    [Ảnh dashboard \emph{ZT-SOC Overview} --- lưu vào
+    \texttt{stage2/assets/images/grafana-overview.png}]}}}
+  \caption{Dashboard \emph{ZT-SOC Overview} trên Grafana.}
+  \label{fig:grafana-overview}
+\end{figure}
+
+\begin{figure}[H]
+  \centering
+  \IfFileExists{assets/images/grafana-incidents.png}{%
+    \includegraphics[width=\linewidth]{grafana-incidents}}{%
+    \fbox{\parbox[c][2.6cm][c]{0.8\linewidth}{\centering\itshape\small
+    [Ảnh dashboard \emph{ZT-SOC Incidents} --- lưu vào
+    \texttt{stage2/assets/images/grafana-incidents.png}]}}}
+  \caption{Dashboard \emph{ZT-SOC Incidents} trên Grafana.}
+  \label{fig:grafana-incidents}
+\end{figure}
+
+\section{Chạy thử nghiệm hệ thống end-to-end}
+\label{sec:impl-e2e}
+
+Để kiểm chứng toàn bộ vòng phát hiện~$\rightarrow$~phản hồi hoạt động liền mạch, hệ
+thống được chạy thử theo một kịch bản end-to-end trên cụm thật.
+Hình~\ref{fig:flow-e2e} tóm tắt kịch bản qua các thành phần đã triển khai, từ pod tấn
+công tới bước xác minh cách ly.
+
+\begin{figure}[H]
+  \centering
+  \resizebox{0.62\linewidth}{!}{\input{../shared/figures/flow-e2e}}
+  \caption{Lưu đồ kịch bản thử nghiệm end-to-end.}
+  \label{fig:flow-e2e}
+\end{figure}
+
+Một pod đóng vai kẻ tấn công được đặt trên một node worker và quét cổng bằng
+\texttt{nmap} ở chế độ connect (\texttt{-sT}) nhắm vào các pod dịch vụ. Bộ thu thập
+eBPF bắt các lời gọi \texttt{connect()} và đẩy sự kiện lên pipeline; khi số kết nối từ
+pod tấn công vượt ngưỡng trong cửa sổ thời gian, pipeline phát cảnh báo
+\texttt{port\_scan} (và \texttt{blast\_radius} khi pod chạm tới nhiều đích) lên NATS.
+Bộ tổng hợp khử trùng lặp và nâng cấp mức nghiêm trọng nếu nguồn xuất hiện trên nhiều
+node; dịch vụ sự cố tạo sự cố, làm giàu địa chỉ nguồn về đúng pod tấn công, rồi sinh
+bản nháp \texttt{NetworkPolicy} chặn mọi lưu lượng đi ra của pod đó. Người vận hành xem
+xét và phê duyệt qua console (điểm dừng có người trong vòng lặp); chỉ khi đó chính sách
+mới được áp vào cụm qua API Kubernetes. Bước cuối xác nhận hiệu lực: sau khi áp chính
+sách, pod tấn công không còn thiết lập được kết nối đi ra, trong khi lưu lượng hợp lệ
+của các pod khác không bị ảnh hưởng.
+
+Mã nguồn~\ref{lst:e2e-log} cho thấy chính xác hệ thống chạy ra như thế nào trong một
+lần thử: nhật ký của pipeline ghi cảnh báo \texttt{port\_scan}/\texttt{blast\_radius},
+dịch vụ sự cố tạo sự cố và tự sinh hành động cách ly, và sau khi tôi phê duyệt trên
+console thì \texttt{NetworkPolicy} được áp khiến pod tấn công mất kết nối đi ra (mã trả
+về của lệnh kết nối đổi từ $0$ sang khác $0$).
+
+\begin{lstlisting}[language={},caption={Nhật ký một lần chạy thử end-to-end (rút gọn từ sự cố \#4 thật trên cụm).},label={lst:e2e-log}]
+# 1) Pipeline phat hien quet cong + blast radius (node master)
+$ kubectl -n zt-mapper logs zt-pipeline-ebpf-qztgt -c pipeline | grep ALERT
+[ALERT] Port scan detected: 100.119.246.28 (freq > tau=40)
+[ALERT] Blast radius from 100.119.246.28: multi-node within 3 hops
+
+# 2) Dich vu su co tao su co cross-node + tu sinh ban nhap NetworkPolicy
+$ kubectl -n soc logs deploy/zt-incident-service | grep -E 'created|action'
+[sub] incident.created id=4 type=blast_radius source=100.119.246.28 severity=critical
+[sub] action.auto_generated incident_id=4 type=quarantine_pod
+
+# 3) Sau khi admin phe duyet tren console -> ap chinh sach cach ly
+[apply] networkpolicy.networking.k8s.io/zt-quarantine-incident-4 created -n zt-targets
+
+# 4) Xac minh: pod tan cong mat ket noi di ra (truoc cach ly exit=0)
+$ kubectl -n zt-targets exec attacker -- nc -w2 10.244.204.161 80; echo "exit=$?"
+exit=1
+\end{lstlisting}
+
+Kịch bản này chứng minh tính \emph{đúng đắn về mặt chức năng} của toàn hệ thống; các số
+liệu định lượng (tỷ lệ phát hiện, FPR, chi phí, độ trễ) được phân tích ở
+Chương~\ref{ch:eval}. Mã nguồn đầy đủ của các thành phần cốt lõi được đưa vào phần Phụ
+lục: chương trình eBPF (Phụ lục~\ref{app:ebpf}), console web (Phụ
+lục~\ref{app:web-console}) và lược đồ dữ liệu PostgreSQL (Phụ lục~\ref{app:sql}).
+
+\section{Kết luận chương}
+
+Chương này đã trình bày trọn vẹn quá trình hiện thực và vận hành hệ thống trên một cụm
+Kubernetes thật, bao trùm cả ba lớp: hạ tầng nền tảng theo mô hình GitOps (giới thiệu
+vắn tắt), ba thành phần lõi được đào sâu kèm trích đoạn mã nguồn/cấu hình thật~--~bộ
+thu thập eBPF, pipeline phát hiện và các dịch vụ SOC~--~cùng ứng dụng giao diện cho
+người vận hành. Riêng \emph{mô hình tin cậy} của bộ thu thập đặc quyền được phân tích
+cùng các giới hạn an ninh ở Chương~\ref{ch:eval}.
+Việc chạy thử end-to-end cho thấy hệ thống không dừng ở mức nguyên mẫu rời rạc mà thực
+sự khép kín được vòng phát hiện~$\rightarrow$~phản hồi với con người ở đúng điểm ra
+quyết định. Đây là tiền đề trực tiếp cho phần đánh giá định lượng ở chương tiếp theo,
+nơi từng mắt xích của vòng này được đo đạc và phân tích trên dữ liệu thật.

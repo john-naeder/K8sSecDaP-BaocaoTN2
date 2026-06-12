@@ -1,0 +1,22 @@
+% BFS theo lop k-hop tu nguon s; ban kinh anh huong R_k. Chuong 2.
+\begin{tikzpicture}[font=\footnotesize, >={Stealth[length=2mm]},
+    v/.style={draw, circle, minimum size=0.8cm, fill=blue!10},
+    s/.style={draw, circle, minimum size=0.8cm, fill=orange!22},
+  ]
+  \node[s] (s) at (0,0) {s};
+  \node[v] (a) at (2.2,0.9) {a};
+  \node[v] (b) at (2.2,-0.9) {b};
+  \node[v] (c) at (4.4,1.3) {c};
+  \node[v] (d) at (4.4,0) {d};
+  \node[v] (e) at (6.6,0.6) {e};
+  \draw[->] (s)--(a); \draw[->] (s)--(b);
+  \draw[->] (a)--(c); \draw[->] (a)--(d); \draw[->] (b)--(d);
+  \draw[->] (d)--(e);
+  % layer separators + labels
+  \foreach \x/\lab in {0/{lớp 0}, 2.2/{lớp 1}, 4.4/{lớp 2}, 6.6/{lớp 3}}{
+    \draw[gray!40, dashed] (\x,-1.7) -- (\x,1.9);
+    \node[gray, font=\scriptsize] at (\x,2.1) {\lab};
+  }
+  \node[align=center, font=\scriptsize] at (3.3,-2.2)
+    {$R_3(s)=\{s,a,b,c,d,e\}$ --- bán kính ảnh hưởng trong $\le 3$ bước};
+\end{tikzpicture}

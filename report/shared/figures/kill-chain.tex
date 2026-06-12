@@ -1,0 +1,30 @@
+% Chuoi tan cong (kill-chain) noi cum K8s; danh dau vung do an phat hien/ngan chan. Chuong 1.
+\begin{tikzpicture}[font=\footnotesize, >={Stealth[length=2.6mm]},
+    st/.style ={draw, rounded corners=3pt, align=center, minimum width=2.55cm,
+                minimum height=1.25cm, fill=gray!8},
+    hot/.style={draw, rounded corners=3pt, align=center, minimum width=2.55cm,
+                minimum height=1.25cm, fill=red!12, draw=red!60!black, line width=0.9pt},
+    flow/.style={->, very thick, gray!55},
+  ]
+  \node[st]  (s1) at (0,0)     {\textbf{1. Xâm nhập}\\ban đầu\\\scriptsize(pod lộ lỗ hổng)};
+  \node[hot] (s2) at (3.0,0)   {\textbf{2. Trinh sát}\\quét cổng\\\scriptsize(nội cụm)};
+  \node[hot] (s3) at (6.0,0)   {\textbf{3. Dịch chuyển}\\\textbf{ngang}\\\scriptsize(pod $\rightarrow$ pod)};
+  \node[st]  (s4) at (9.0,0)   {\textbf{4. Tiếp cận}\\mục tiêu\\\scriptsize(CSDL, secret)};
+  \node[st]  (s5) at (12.0,0)  {\textbf{5. Tác động}\\\scriptsize(rò rỉ /\\phá hoại)};
+
+  \draw[flow] (s1)--(s2); \draw[flow] (s2)--(s3); \draw[flow] (s3)--(s4); \draw[flow] (s4)--(s5);
+
+  % Vung phat hien cua do an = giai doan 2-3
+  \draw[decorate, decoration={brace, amplitude=7pt, mirror}]
+    ($(s2.south west)+(0,-0.2)$) -- ($(s3.south east)+(0,-0.2)$)
+    node[midway, below=10pt, align=center, font=\footnotesize\bfseries, text=red!60!black]
+    {Vùng K8sSecDaP phát hiện sớm \& ngăn chặn\\(tín hiệu tần suất $+$ cấu trúc đồ thị)};
+
+  % Ghi chu an ninh chu vi chi chan duoc 2 dau
+  \draw[decorate, decoration={brace, amplitude=6pt}]
+    ($(s1.north west)+(0,0.2)$) -- ($(s1.north east)+(0,0.2)$)
+    node[midway, above=8pt, font=\scriptsize\itshape] {an ninh chu vi};
+  \draw[decorate, decoration={brace, amplitude=6pt}]
+    ($(s5.north west)+(0,0.2)$) -- ($(s5.north east)+(0,0.2)$)
+    node[midway, above=8pt, font=\scriptsize\itshape] {DLP / lối ra};
+\end{tikzpicture}

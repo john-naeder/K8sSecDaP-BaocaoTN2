@@ -1,0 +1,71 @@
+# Monthly retention pruner.
+#   - alerts table: drop raw payloads > 180 days (incidents and audit_log
+#     stay intact — compliance requires immutable audit history).
+#   - MinIO zt-postgres-backups: keep the 30 most recent daily snapshots.
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: retention-prune
+  namespace: soc
+  labels:
+    app.kubernetes.io/name: retention-prune
+    app.kubernetes.io/part-of: zero-trust-mapper
+spec:
+  schedule: "0 4 1 * *"             # 1st of month, 04:00 UTC
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      template:
+        spec:
+          restartPolicy: OnFailure
+          containers:
+            - name: prune
+              image: postgres:16-alpine
+              command:
+                - sh
+                - -c
+                - |
+                  set -euo pipefail
+                  apk add --no-cache curl ca-certificates >/dev/null
+                  curl -fsSLo /usr/local/bin/mc https://dl.min.io/client/mc/release/linux-amd64/mc
+                  chmod +x /usr/local/bin/mc
+
+                  echo "[prune] alerts older than 180 days"
+                  PGPASSWORD="$POSTGRES_PASSWORD" psql \
+                      -h "$POSTGRES_HOST" -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 \
+                      -c "DELETE FROM alerts WHERE received_at < NOW() - INTERVAL '180 days';"
+
+                  echo "[prune] keep 30 most recent backups in MinIO"
+                  mc alias set ms "http://$MINIO_ENDPOINT" "$MINIO_ACCESS_KEY" "$MINIO_SECRET_KEY"
+                  # Sort newest-first, skip first 30, delete the rest.
+                  mc ls ms/zt-postgres-backups | sort -k1,2 -r | awk 'NR>30 {print $NF}' \
+                      | while read -r f; do
+                          [ -n "$f" ] && mc rm "ms/zt-postgres-backups/$f"
+                        done
+                  echo "[prune] done"
+              env:
+                - { name: POSTGRES_HOST, value: "postgres.soc.svc.cluster.local" }
+                - name: POSTGRES_USER
+                  valueFrom: { secretKeyRef: { name: postgres-creds, key: POSTGRES_USER } }
+                - name: POSTGRES_PASSWORD
+                  valueFrom: { secretKeyRef: { name: postgres-creds, key: POSTGRES_PASSWORD } }
+                - name: POSTGRES_DB
+                  valueFrom: { secretKeyRef: { name: postgres-creds, key: POSTGRES_DB } }
+                - { name: MINIO_ENDPOINT,   value: "minio.soc.svc.cluster.local:9000" }
+                - name: MINIO_ACCESS_KEY
+                  valueFrom: { secretKeyRef: { name: minio-creds, key: MINIO_ROOT_USER } }
+                - name: MINIO_SECRET_KEY
+                  valueFrom: { secretKeyRef: { name: minio-creds, key: MINIO_ROOT_PASSWORD } }
+              resources:
+                requests: { cpu: 100m, memory: 128Mi }
+                limits:   { cpu: 500m, memory: 256Mi }
+              securityContext:
+                runAsNonRoot: true
+                runAsUser: 70
+                allowPrivilegeEscalation: false
+                capabilities: { drop: ["ALL"] }
+                seccompProfile: { type: RuntimeDefault }

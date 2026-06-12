@@ -1,0 +1,4 @@
+usage: build/bin/trace_algorithms {cms|misra|compare}
+  cms      : Count-Min Sketch step-by-step trace
+  misra    : Misra-Gries step-by-step trace
+  compare  : run all three (exact, CMS, MG) side by side

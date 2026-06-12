@@ -1,0 +1,95 @@
+# Grafana dashboards for zt-soc, imported by the kube-prometheus-stack Grafana
+# sidecar (it watches ConfigMaps labelled grafana_dashboard="1" cluster-wide).
+# Dashboard JSON mirrors K8sSecDaP-soc/manifests/grafana/*.json; every PromQL
+# references a metric actually exported by incident-service (:9101) or
+# aggregator (:9100) — verified against the service source.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: zt-soc-dashboards
+  namespace: monitoring
+  labels:
+    grafana_dashboard: "1"
+data:
+  zt-soc-overview.json: |
+    {
+      "annotations": { "list": [] },
+      "editable": true,
+      "title": "ZT-SOC Overview",
+      "uid": "zt-soc-overview",
+      "schemaVersion": 39,
+      "version": 1,
+      "time": { "from": "now-1h", "to": "now" },
+      "templating": { "list": [] },
+      "panels": [
+        {
+          "type": "stat",
+          "title": "Active Incidents",
+          "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
+          "targets": [
+            { "expr": "zt_aggregator_active_incidents", "refId": "A" }
+          ]
+        },
+        {
+          "type": "stat",
+          "title": "Cross-Node Incidents",
+          "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
+          "targets": [
+            { "expr": "zt_aggregator_active_cross_node_incidents", "refId": "A" }
+          ]
+        },
+        {
+          "type": "timeseries",
+          "title": "Alerts Received Rate",
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
+          "targets": [
+            { "expr": "rate(zt_aggregator_alerts_received_total[5m])", "refId": "A" }
+          ]
+        },
+        {
+          "type": "timeseries",
+          "title": "Alerts Emitted by Reason",
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
+          "targets": [
+            { "expr": "sum by (reason) (rate(zt_aggregator_alerts_emitted_total[5m]))", "refId": "A" }
+          ]
+        }
+      ]
+    }
+  zt-soc-incidents.json: |
+    {
+      "annotations": { "list": [] },
+      "editable": true,
+      "title": "ZT-SOC Incidents",
+      "uid": "zt-soc-incidents",
+      "schemaVersion": 39,
+      "version": 1,
+      "time": { "from": "now-6h", "to": "now" },
+      "templating": { "list": [] },
+      "panels": [
+        {
+          "type": "stat",
+          "title": "Incidents Created (total)",
+          "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
+          "targets": [
+            { "expr": "zt_incidents_created_total", "refId": "A" }
+          ]
+        },
+        {
+          "type": "timeseries",
+          "title": "Incident Creation Rate",
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
+          "targets": [
+            { "expr": "rate(zt_incidents_created_total[5m])", "refId": "A" }
+          ]
+        },
+        {
+          "type": "timeseries",
+          "title": "Actions Generated Rate",
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
+          "targets": [
+            { "expr": "rate(zt_actions_generated_total[5m])", "refId": "A" }
+          ]
+        }
+      ]
+    }

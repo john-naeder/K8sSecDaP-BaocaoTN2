@@ -1,0 +1,540 @@
+% ============================================================================
+% Chuong 3: PHAN TICH VA THIET KE HE THONG
+% ============================================================================
+
+\chapter{PHÂN TÍCH VÀ THIẾT KẾ HỆ THỐNG}
+\label{ch:design}
+
+Chương này đi từ mô hình mối đe dọa và các yêu cầu suy ra từ nó, qua kiến trúc
+phần mềm và luồng dữ liệu, tới thiết kế cơ sở dữ liệu, quy trình phản hồi và thiết
+kế giao diện vận hành. Mục tiêu là làm rõ \emph{tại sao} hệ thống được tổ chức như
+vậy trước khi trình bày cách hiện thực ở Chương~\ref{ch:impl}.
+
+\section{Mô hình mối đe dọa và yêu cầu hệ thống}
+\label{sec:threat-model}
+
+Thiết kế của hệ thống được dẫn dắt bởi một mô hình mối đe dọa cụ thể thay vì các
+giả định chung chung. \emph{Tài sản} cần bảo vệ là các pod và dịch vụ trong namespace
+mục tiêu của cụm. \emph{Kẻ tấn công} được giả định là một pod đã bị chiếm quyền điều
+khiển bên trong cụm --- tình huống hoàn toàn thực tế khi một dịch vụ phơi ra Internet
+bị khai thác --- và từ chỗ đứng đó kẻ tấn công tiến hành quét cổng theo chiều dọc
+(nhiều cổng trên một đích) và theo chiều ngang (một cổng trên nhiều đích) nhằm lập
+bản đồ mạng nội bộ, rồi dịch chuyển ngang tới các pod khác. \emph{Khả năng quan sát}
+của hệ thống dựa trên một sự thật kiến trúc: mọi kết nối TCP của mọi pod đều phải đi
+qua nhân Linux của nút chứa nó, do đó một bộ thu thập eBPF đặt ở tầng nhân quan sát
+được trọn vẹn lưu lượng mà không cần thay đổi ứng dụng. Mô hình giả định CNI có hỗ
+trợ \texttt{NetworkPolicy}, nhân có BTF, lưu lượng là IPv4, và kẻ tấn công chỉ có
+quyền bên trong pod chứ không có quyền root trên nút; các tình huống nằm ngoài mô
+hình --- tấn công ở tầng ứng dụng (L7), khai thác lỗ hổng nhân, hay kẻ tấn công đã
+thoát khỏi container --- được ghi nhận tường minh là giới hạn phạm vi.
+
+Từ mô hình trên, các tác nhân và chức năng của hệ thống được xác định. Người vận
+hành an ninh (\textit{analyst}) tương tác với hệ thống để theo dõi cảnh báo, điều tra
+sự cố và phê duyệt hành động phản hồi; hệ thống tự động đảm nhiệm việc thu thập, phát
+hiện, tạo sự cố và sinh bản nháp chính sách. Hình~\ref{fig:usecase-soc} mô tả các
+trường hợp sử dụng (\textit{use case}) chính theo các tác nhân, còn
+Hình~\ref{fig:bfd} phân rã hệ thống thành các nhóm chức năng. Từ đó, các \emph{yêu cầu
+chức năng} cốt lõi gồm: thu thập sự kiện kết nối ở tầng nhân; phát hiện quét cổng và
+dịch chuyển ngang theo thời gian thực; tạo và làm giàu sự cố; sinh chính sách cách ly
+theo cơ chế có người duyệt; và cung cấp giao diện theo dõi/xử lý. Các \emph{yêu cầu
+phi chức năng} quan trọng gồm: chi phí thu thập đủ thấp để chạy thường trực trên mọi
+nút, độ trễ phát hiện$\rightarrow$phản hồi ở mức giây, và khả năng tái lập trên cụm
+thật --- những tiêu chí này được kiểm chứng định lượng ở Chương~\ref{ch:eval}.
+
+\begin{figure}[H]
+  \centering
+  \resizebox{0.9\linewidth}{!}{\input{../shared/figures/usecase-soc}}
+  \caption{Sơ đồ use-case của hệ thống.}
+  \label{fig:usecase-soc}
+\end{figure}
+
+\begin{figure}[H]
+  \centering
+  \resizebox{0.92\linewidth}{!}{\input{../shared/figures/bfd-functions}}
+  \caption{Sơ đồ phân rã chức năng (BFD) của nền tảng giám sát an ninh.}
+  \label{fig:bfd}
+\end{figure}
+
+Bảng~\ref{tab:bfd-leaf} đặc tả từng chức năng lá của sơ đồ phân rã --- nêu rõ nhiệm vụ cụ
+thể của mỗi nút lá, làm cầu nối giữa phân rã chức năng và thiết kế thành phần ở các mục sau.
+
+\begin{table}[H]
+  \centering
+  \caption{Đặc tả các chức năng lá của sơ đồ phân rã chức năng (BFD).}
+  \label{tab:bfd-leaf}
+  \small
+  \begin{tabularx}{\linewidth}{@{}l l X@{}}
+    \toprule
+    \textbf{Mã} & \textbf{Chức năng lá} & \textbf{Nhiệm vụ} \\
+    \midrule
+    1.1 & eBPF kprobe \texttt{tcp\_v4\_connect} & Bắt mọi lời gọi \texttt{connect()} TCP/IPv4 ở tầng nhân trên mỗi nút \\
+    1.2 & Chuẩn hoá sự kiện           & Trích src/dst/cổng/pid/thời gian, lọc theo nhãn vùng mạng, xuất JSON \\
+    2.1 & Đếm tần suất (CMS)          & Cập nhật Count-Min Sketch theo địa chỉ nguồn, ước lượng số kết nối \\
+    2.2 & Đồ thị SCC / blast-radius   & Dựng đồ thị giao tiếp, chạy Tarjan và BFS để tìm chu trình và bán kính \\
+    2.3 & Ngưỡng \& cửa sổ thời gian  & So sánh tần suất với ngưỡng trên cửa sổ trượt, quyết định phát cảnh báo \\
+    3.1 & Vòng đời sự cố              & Tạo, gộp trùng, cập nhật trạng thái (new/ack/resolved) của sự cố \\
+    3.2 & Làm giàu IP$\rightarrow$Pod & Ánh xạ địa chỉ nguồn về tên pod và namespace qua API Kubernetes \\
+    4.1 & Sinh NetworkPolicy         & Tạo bản nháp chính sách egress-deny gắn nhãn lên pod tấn công \\
+    4.2 & Duyệt \& áp cách ly         & Trình bản nháp cho người duyệt; khi đồng ý thì áp qua API Kubernetes \\
+    4.3 & Kiểm chứng cách ly         & Xác minh pod tấn công mất kết nối đi ra sau khi áp chính sách \\
+    5.1 & Dashboard Grafana          & Trực quan hóa số liệu và cảnh báo theo thời gian thực cho người vận hành \\
+    5.2 & Nhật ký kiểm toán          & Ghi lại mọi thao tác trên sự cố/hành động phục vụ điều tra và tuân thủ \\
+    \bottomrule
+  \end{tabularx}
+\end{table}
+
+\subsection{Đặc tả use-case}
+\label{subsec:uc-spec}
+
+Bảng~\ref{tab:uc-list} liệt kê các use-case của hệ thống cùng tác nhân tương ứng. Tác
+nhân \emph{Chuyên viên phân tích} (Analyst) và \emph{Quản trị viên} (Admin) là người dùng;
+\emph{Hệ thống} đại diện cho các chức năng tự động (thu thập, phát hiện, sinh sự cố) chạy
+không cần can thiệp. Sau bảng tổng hợp là đặc tả chi tiết của các use-case quan trọng nhất.
+
+\begin{table}[H]
+  \centering
+  \caption{Danh sách use-case và tác nhân.}
+  \label{tab:uc-list}
+  \small
+  \begin{tabularx}{\linewidth}{@{}l X l@{}}
+    \toprule
+    \textbf{Mã} & \textbf{Use-case} & \textbf{Tác nhân} \\
+    \midrule
+    UC-01 & Xem dashboard và cảnh báo            & Analyst, Admin \\
+    UC-02 & Điều tra chi tiết sự cố              & Analyst, Admin \\
+    UC-03 & Ghi nhận / đóng sự cố                & Analyst, Admin \\
+    UC-04 & Duyệt và áp hành động phản hồi       & Admin \\
+    UC-05 & Cấu hình ngưỡng phát hiện và người dùng & Admin \\
+    UC-06 & Tra cứu nhật ký kiểm toán            & Analyst, Admin \\
+    UC-S1 & Thu thập, phát hiện và sinh sự cố (tự động) & Hệ thống \\
+    \bottomrule
+  \end{tabularx}
+\end{table}
+
+\begin{table}[H]
+  \centering
+  \caption{Đặc tả use-case UC-02 --- Điều tra chi tiết sự cố.}
+  \label{tab:uc02}
+  \small
+  \begin{tabularx}{\linewidth}{@{}>{\bfseries}l X@{}}
+    \toprule
+    Mã / Tên & UC-02 --- Điều tra chi tiết sự cố \\
+    \midrule
+    Tác nhân & Chuyên viên phân tích (Analyst) \\
+    Mô tả & Người vận hành mở một sự cố để xem ngữ cảnh đã làm giàu, các cảnh báo liên quan và bán kính ảnh hưởng nhằm đánh giá mức độ nghiêm trọng. \\
+    Tiền điều kiện & Đã đăng nhập; tồn tại ít nhất một sự cố trong hệ thống. \\
+    Luồng chính &
+      \begin{enumerate}[nosep,leftmargin=*]
+        \item Analyst chọn một sự cố từ danh sách.
+        \item Hệ thống truy vấn cơ sở dữ liệu lấy chi tiết sự cố.
+        \item Hệ thống hiển thị siêu dữ liệu (địa chỉ nguồn, pod, nút, mức độ, nhãn).
+        \item Hệ thống hiển thị danh sách cảnh báo liên quan và đồ thị bán kính ảnh hưởng.
+        \item Analyst xem và đánh giá ngữ cảnh sự cố.
+      \end{enumerate} \\
+    Luồng thay thế & 2a. Không tìm thấy sự cố: hệ thống báo lỗi và quay lại danh sách. \\
+    Hậu điều kiện & Sự cố được hiển thị đầy đủ; sẵn sàng cho thao tác ghi nhận/đóng hoặc duyệt phản hồi. \\
+    \bottomrule
+  \end{tabularx}
+\end{table}
+
+\begin{table}[H]
+  \centering
+  \caption{Đặc tả use-case UC-04 --- Duyệt và áp hành động phản hồi.}
+  \label{tab:uc04}
+  \small
+  \begin{tabularx}{\linewidth}{@{}>{\bfseries}l X@{}}
+    \toprule
+    Mã / Tên & UC-04 --- Duyệt và áp hành động phản hồi \\
+    \midrule
+    Tác nhân & Quản trị viên (Admin) \\
+    Mô tả & Admin xem xét bản nháp \texttt{NetworkPolicy} cách ly do hệ thống sinh ra và quyết định phê duyệt hay từ chối; khi phê duyệt, chính sách được áp vào cụm. \\
+    Tiền điều kiện & Đã đăng nhập với quyền Admin; sự cố có một bản nháp hành động ở trạng thái chờ duyệt. \\
+    Luồng chính &
+      \begin{enumerate}[nosep,leftmargin=*]
+        \item Admin mở sự cố và chọn hành động phản hồi chờ duyệt.
+        \item Hệ thống hiển thị xem trước nội dung \texttt{NetworkPolicy} sẽ áp.
+        \item Admin nhập lý do và bấm Phê duyệt.
+        \item Hệ thống áp chính sách qua API Kubernetes (Calico thực thi).
+        \item Hệ thống xác minh hiệu lực và cập nhật trạng thái hành động.
+        \item Hệ thống ghi toàn bộ thao tác vào nhật ký kiểm toán.
+      \end{enumerate} \\
+    Luồng thay thế &
+      3a. Admin từ chối: hệ thống đánh dấu từ chối, ghi kiểm toán, không áp chính sách.\newline
+      4a. Lỗi áp chính sách: hệ thống ghi lỗi, giữ trạng thái chờ và thông báo. \\
+    Hậu điều kiện & Pod tấn công bị cách ly (nếu phê duyệt); mọi quyết định đều có dấu vết kiểm toán. \\
+    \bottomrule
+  \end{tabularx}
+\end{table}
+
+\begin{table}[H]
+  \centering
+  \caption{Đặc tả use-case UC-05 --- Cấu hình ngưỡng phát hiện và người dùng.}
+  \label{tab:uc05}
+  \small
+  \begin{tabularx}{\linewidth}{@{}>{\bfseries}l X@{}}
+    \toprule
+    Mã / Tên & UC-05 --- Cấu hình ngưỡng phát hiện và người dùng \\
+    \midrule
+    Tác nhân & Quản trị viên (Admin) \\
+    Mô tả & Admin điều chỉnh tham số phát hiện (ngưỡng, độ dài cửa sổ, kích thước sketch) và quản lý tài khoản/vai trò người dùng. \\
+    Tiền điều kiện & Đã đăng nhập với quyền Admin. \\
+    Luồng chính &
+      \begin{enumerate}[nosep,leftmargin=*]
+        \item Admin mở trang cấu hình.
+        \item Admin sửa tham số phát hiện hoặc thông tin người dùng/vai trò.
+        \item Hệ thống kiểm tra hợp lệ và lưu cấu hình.
+        \item Hệ thống áp dụng cấu hình mới cho pipeline và ghi kiểm toán.
+      \end{enumerate} \\
+    Luồng thay thế & 3a. Dữ liệu không hợp lệ: hệ thống báo lỗi và yêu cầu nhập lại. \\
+    Hậu điều kiện & Cấu hình mới có hiệu lực; thay đổi được lưu vết. \\
+    \bottomrule
+  \end{tabularx}
+\end{table}
+
+\begin{table}[H]
+  \centering
+  \caption{Đặc tả use-case UC-01 --- Xem dashboard và cảnh báo.}
+  \label{tab:uc01}
+  \small
+  \begin{tabularx}{\linewidth}{@{}>{\bfseries}l X@{}}
+    \toprule
+    Mã / Tên & UC-01 --- Xem dashboard và cảnh báo \\
+    \midrule
+    Tác nhân & Chuyên viên phân tích (Analyst), Quản trị viên (Admin) \\
+    Mô tả & Người vận hành theo dõi tình hình an ninh nội cụm qua bảng điều khiển Grafana và danh sách cảnh báo/sự cố mới nhất. \\
+    Tiền điều kiện & Đã đăng nhập; hệ thống đang thu thập và phát hiện. \\
+    Luồng chính &
+      \begin{enumerate}[nosep,leftmargin=*]
+        \item Người vận hành mở trang tổng quan.
+        \item Hệ thống truy vấn số liệu (Prometheus) và danh sách sự cố mới.
+        \item Hệ thống hiển thị các biểu đồ thời gian thực và bảng hành động chờ duyệt.
+        \item Người vận hành nắm bắt tình hình và chọn mục cần điều tra.
+      \end{enumerate} \\
+    Luồng thay thế & 2a. Nguồn số liệu tạm gián đoạn: hiển thị cảnh báo thiếu dữ liệu. \\
+    Hậu điều kiện & Bức tranh tổng quan được hiển thị; sẵn sàng cho điều tra chi tiết (UC-02). \\
+    \bottomrule
+  \end{tabularx}
+\end{table}
+
+\begin{table}[H]
+  \centering
+  \caption{Đặc tả use-case UC-03 --- Ghi nhận / đóng sự cố.}
+  \label{tab:uc03}
+  \small
+  \begin{tabularx}{\linewidth}{@{}>{\bfseries}l X@{}}
+    \toprule
+    Mã / Tên & UC-03 --- Ghi nhận / đóng sự cố \\
+    \midrule
+    Tác nhân & Chuyên viên phân tích (Analyst) \\
+    Mô tả & Sau khi điều tra, người vận hành ghi nhận (\textit{ack}) sự cố đang xử lý hoặc đóng (\textit{resolve}) sự cố đã giải quyết. \\
+    Tiền điều kiện & Đã đăng nhập; sự cố tồn tại và đang ở trạng thái mở. \\
+    Luồng chính &
+      \begin{enumerate}[nosep,leftmargin=*]
+        \item Người vận hành mở chi tiết sự cố.
+        \item Người vận hành chọn ``Ack'' hoặc ``Resolve''.
+        \item Hệ thống cập nhật trạng thái sự cố trong cơ sở dữ liệu.
+        \item Hệ thống ghi thao tác vào nhật ký kiểm toán.
+      \end{enumerate} \\
+    Luồng thay thế & 3a. Sự cố đã đổi trạng thái bởi người khác: hệ thống thông báo và làm mới. \\
+    Hậu điều kiện & Trạng thái sự cố được cập nhật; thao tác có dấu vết kiểm toán. \\
+    \bottomrule
+  \end{tabularx}
+\end{table}
+
+\section{Kiến trúc phần mềm và luồng dữ liệu}
+\label{ch:architecture}
+
+Hệ thống được tổ chức theo kiến trúc phân lớp, mỗi lớp một trách nhiệm rõ ràng và
+giao tiếp với nhau qua các giao diện ổn định. Hình~\ref{fig:arch-c4} trình bày kiến
+trúc ở mức container (theo mô hình C4): ở mỗi nút, một bộ thu thập eBPF chạy dưới dạng
+\texttt{DaemonSet} bắt sự kiện kết nối và đẩy lên bộ máy pipeline qua bộ đệm vòng; bộ
+máy pipeline áp các giải thuật phát hiện và phát cảnh báo lên trục thông điệp NATS;
+phía trung tâm, bộ tổng hợp (\textit{aggregator}) tương quan và khử trùng lặp cảnh báo
+trên phạm vi toàn cụm, dịch vụ sự cố tạo và làm giàu sự cố rồi lưu vào PostgreSQL, còn
+bộ sinh phản hồi tạo bản nháp
+\texttt{NetworkPolicy}; cuối cùng, người vận hành theo dõi qua Grafana và thao tác qua
+console web. Cách phân tách này cho phép thay thế hoặc nâng cấp từng thành phần độc
+lập, đồng thời cô lập phần chạy đặc quyền (bộ thu thập tầng nhân) khỏi phần logic
+nghiệp vụ.
+
+Luồng dữ liệu xuyên suốt hệ thống được mô tả ở hai mức. Hình~\ref{fig:dfd0} cho cái
+nhìn ngữ cảnh: dữ liệu khởi nguồn từ lưu lượng kết nối trong nhân, chảy qua hệ thống
+xử lý và kết thúc ở người vận hành dưới dạng cảnh báo, sự cố và hành động phản hồi.
+Hình~\ref{fig:dfd1} phân rã chi tiết hơn các tiến trình bên trong và các kho dữ liệu
+mà chúng đọc/ghi. Riêng tuyến đường ``trên mỗi nút $\rightarrow$ xử lý tập trung''
+--- đặc trưng của mô hình \texttt{DaemonSet} --- được làm rõ ở
+Hình~\ref{fig:agent-flow}: phần chạy phân tán trên từng nút chỉ đảm nhiệm thu thập và
+phát hiện cục bộ, còn việc hợp nhất, lưu trữ và hiển thị được tập trung hóa.
+
+\begin{figure}[H]
+  \centering
+  \resizebox{0.72\linewidth}{!}{\input{../shared/figures/arch-c4}}
+  \caption{Kiến trúc mức container (mô hình C4).}
+  \label{fig:arch-c4}
+\end{figure}
+
+\begin{figure}[H]
+  \centering
+  \resizebox{0.85\linewidth}{!}{\input{../shared/figures/dfd-level0}}
+  \caption{Sơ đồ luồng dữ liệu mức ngữ cảnh (DFD level 0).}
+  \label{fig:dfd0}
+\end{figure}
+
+\begin{figure}[H]
+  \centering
+  \resizebox{0.95\linewidth}{!}{\input{../shared/figures/dfd-level1}}
+  \caption{Sơ đồ luồng dữ liệu mức 1.}
+  \label{fig:dfd1}
+\end{figure}
+
+Tiến trình phát hiện (2.0) --- phần lõi thuật toán của hệ thống --- được phân rã thêm một
+mức ở Hình~\ref{fig:dfd2}: sự kiện sau khi phân loại địa chỉ (2.1) vừa được đếm tần suất
+bằng Count-Min Sketch (2.2) vừa được dùng để phân tích đồ thị bằng Tarjan/BFS (2.3); cả
+hai nhánh đọc/ghi trạng thái sketch và đồ thị, rồi hội tụ ở bước sinh cảnh báo (2.4).
+
+\begin{figure}[H]
+  \centering
+  \resizebox{0.95\linewidth}{!}{\input{../shared/figures/dfd-level2}}
+  \caption{Sơ đồ luồng dữ liệu mức 2 (tiến trình phát hiện).}
+  \label{fig:dfd2}
+\end{figure}
+
+\begin{figure}[H]
+  \centering
+  \resizebox{0.95\linewidth}{!}{\input{../shared/figures/agent-sidecar-flow}}
+  \caption{Luồng xử lý phân tán trên mỗi nút (DaemonSet) và phần xử lý tập trung.}
+  \label{fig:agent-flow}
+\end{figure}
+
+Một quyết định thiết kế quan trọng ở tầng pipeline là áp dụng mẫu thiết kế Strategy
+kết hợp Registry \cite{gamma1995patterns}: mỗi họ giải thuật (ước lượng tần suất, phát
+hiện thành phần liên thông mạnh, tính khả-đạt, phân loại địa chỉ) được trừu tượng hóa
+thành một giao diện chung và đăng ký vào một sổ đăng ký; việc lựa chọn cài đặt cụ thể
+được điều khiển hoàn toàn bằng tệp cấu hình YAML. Nhờ đó, có thể thay Count-Min Sketch
+bằng một biến thể khác, hoặc đổi tham số cửa sổ và ngưỡng, mà không phải sửa và biên
+dịch lại mã nguồn --- một đặc tính có giá trị cho cả việc thử nghiệm lẫn vận hành.
+
+\subsection{Luồng gọi giữa các dịch vụ}
+\label{subsec:sequences}
+
+Để làm rõ trình tự tương tác giữa các thành phần, ba sơ đồ tuần tự (\textit{sequence
+diagram}) dưới đây mô tả ba kịch bản chính. Hình~\ref{fig:seq-ingestion} là luồng
+\emph{thu thập}: một lời gọi \texttt{connect()} trong pod bị kprobe bắt, bộ thu thập lọc
+theo nhãn vùng mạng rồi đẩy sự kiện sang pipeline; pipeline cập nhật Count-Min Sketch và
+phát cảnh báo khi vượt ngưỡng.
+
+\begin{figure}[H]
+  \centering
+  \resizebox{0.86\linewidth}{!}{\input{../shared/figures/seq-ingestion}}
+  \caption{Sơ đồ tuần tự: thu thập sự kiện và phát hiện quét cổng.}
+  \label{fig:seq-ingestion}
+\end{figure}
+
+Hình~\ref{fig:seq-incident} là luồng \emph{tạo và làm giàu sự cố}: dịch vụ sự cố nhận
+cảnh báo từ NATS, tạo sự cố, tra cứu API Kubernetes để ánh xạ địa chỉ nguồn về đúng pod,
+lưu sự cố kèm ngữ cảnh vào PostgreSQL và sinh bản nháp chính sách cách ly.
+
+\begin{figure}[H]
+  \centering
+  \resizebox{0.86\linewidth}{!}{\input{../shared/figures/seq-incident}}
+  \caption{Sơ đồ tuần tự: tạo và làm giàu sự cố.}
+  \label{fig:seq-incident}
+\end{figure}
+
+Hình~\ref{fig:seq-response} là luồng \emph{phê duyệt và áp phản hồi}: quản trị viên phê
+duyệt qua console, dịch vụ sự cố áp \texttt{NetworkPolicy} qua API Kubernetes, cập nhật
+trạng thái và ghi nhật ký kiểm toán trước khi phản hồi kết quả về giao diện.
+
+\begin{figure}[H]
+  \centering
+  \resizebox{0.96\linewidth}{!}{\input{../shared/figures/seq-response}}
+  \caption{Sơ đồ tuần tự: phê duyệt và áp hành động phản hồi.}
+  \label{fig:seq-response}
+\end{figure}
+
+\subsection{Thiết kế chi tiết từng thành phần}
+\label{subsec:per-app}
+
+Mỗi thành phần trong kiến trúc được phân rã thành các mô-đun nội bộ với trách nhiệm rõ
+ràng. Bộ thu thập (Hình~\ref{fig:comp-collect-pipe}, trái) gồm chương trình eBPF gắn ở
+tầng nhân, ba BPF map, bộ đọc \texttt{libbpf} và bộ xuất JSON; pipeline (phải) nạp cấu
+hình YAML, dựng các giải thuật qua Registry, chạy vòng lặp xử lý và phát cảnh báo.
+
+\begin{figure}[H]
+  \centering
+  \begin{minipage}{0.48\linewidth}\centering\resizebox{\linewidth}{!}{\input{../shared/figures/comp-collector}}\end{minipage}\hfill
+  \begin{minipage}{0.48\linewidth}\centering\resizebox{\linewidth}{!}{\input{../shared/figures/comp-pipeline}}\end{minipage}
+  \caption{Thiết kế thành phần: collector (trái) và pipeline (phải).}
+  \label{fig:comp-collect-pipe}
+\end{figure}
+
+Phía trung tâm, bộ tổng hợp (Hình~\ref{fig:comp-agg-bridge}, trái) tương quan và khử
+trùng lặp cảnh báo theo cửa sổ thời gian (khóa \texttt{type|source}) và nâng cấp mức
+nghiêm trọng khi cùng một nguồn xuất hiện trên nhiều node (\emph{cross-node}); còn phân
+tích đồ thị (Tarjan/BFS tính bán kính ảnh hưởng) chạy ngay trong pipeline mỗi node. Bộ
+cầu nối cảnh báo (phải) chuẩn hoá và chuyển tiếp cảnh báo tới dịch vụ sự cố.
+
+\begin{figure}[H]
+  \centering
+  \begin{minipage}{0.48\linewidth}\centering\resizebox{\linewidth}{!}{\input{../shared/figures/comp-aggregator}}\end{minipage}\hfill
+  \begin{minipage}{0.48\linewidth}\centering\resizebox{\linewidth}{!}{\input{../shared/figures/comp-alert-bridge}}\end{minipage}
+  \caption{Thiết kế thành phần: aggregator (trái) và alert-bridge (phải).}
+  \label{fig:comp-agg-bridge}
+\end{figure}
+
+Dịch vụ sự cố (Hình~\ref{fig:comp-inc-console}, trái) là thành phần phức tạp nhất: nó
+quản lý vòng đời sự cố, ánh xạ địa chỉ về pod, sinh \texttt{NetworkPolicy}, áp RBAC và ghi
+kiểm toán, đồng thời lưu trữ vào PostgreSQL; console web (phải) kết xuất giao diện phía
+máy chủ và gọi dịch vụ sự cố qua API.
+
+\begin{figure}[H]
+  \centering
+  \begin{minipage}{0.48\linewidth}\centering\resizebox{\linewidth}{!}{\input{../shared/figures/comp-incident}}\end{minipage}\hfill
+  \begin{minipage}{0.48\linewidth}\centering\resizebox{\linewidth}{!}{\input{../shared/figures/comp-console}}\end{minipage}
+  \caption{Thiết kế thành phần: incident-service (trái) và web-console (phải).}
+  \label{fig:comp-inc-console}
+\end{figure}
+
+\subsection{Đặc tả phần mềm theo mô-đun}
+\label{subsec:soft-spec}
+
+Bảng~\ref{tab:soft-spec} đặc tả tóm tắt từng mô-đun theo ba trục đầu vào --- xử lý ---
+đầu ra, giúp xác định rõ ranh giới trách nhiệm và giao diện giữa các thành phần trước khi
+hiện thực.
+
+\begin{table}[H]
+  \centering
+  \caption{Đặc tả phần mềm theo mô-đun (đầu vào / xử lý / đầu ra).}
+  \label{tab:soft-spec}
+  \small
+  \begin{tabularx}{\linewidth}{@{}l X X X@{}}
+    \toprule
+    \textbf{Mô-đun} & \textbf{Đầu vào} & \textbf{Xử lý} & \textbf{Đầu ra} \\
+    \midrule
+    collector       & Sự kiện \texttt{connect()} ở nhân & Lọc LPM, đọc ring buffer & Dòng JSON sự kiện \\
+    pipeline        & Sự kiện JSON, cấu hình YAML & CMS, kiểm ngưỡng, đồ thị + Tarjan/BFS & Cảnh báo (NDJSON) \\
+    alert-bridge    & Tệp \texttt{alerts.json} (NDJSON) & Theo dõi đuôi tệp, publish & Cảnh báo lên \texttt{zt.alerts.raw} \\
+    aggregator      & Cảnh báo thô từ NATS & Khử trùng lặp theo cửa sổ, nâng cấp cross-node & Cảnh báo đã tương quan \\
+    incident-service& Cảnh báo, yêu cầu API & Tạo/làm giàu sự cố, sinh policy, RBAC & Sự cố, bản nháp policy, kiểm toán \\
+    web-console     & Thao tác người dùng (HTTP) & Xác thực, RBAC, kết xuất SSR & Trang HTML, lời gọi API \\
+    \bottomrule
+  \end{tabularx}
+\end{table}
+
+\section{Thiết kế cơ sở dữ liệu}
+\label{ch:database}
+
+Trung tâm vận hành an ninh cần một kho lưu trữ bền vững, nhất quán cho sự cố, cảnh báo,
+hành động phản hồi và nhật ký kiểm toán. Hệ thống chọn PostgreSQL vì ba lý do bám sát
+yêu cầu: thứ nhất, các bảo đảm giao dịch ACID giữ cho vòng đời sự cố (tạo, làm giàu,
+phê duyệt, đóng) luôn ở trạng thái nhất quán ngay cả khi nhiều dịch vụ ghi đồng thời;
+thứ hai, kiểu dữ liệu \texttt{JSONB} cùng chỉ mục GIN cho phép lưu và truy vấn hiệu quả
+các trường bán cấu trúc như chi tiết cảnh báo hay danh sách nhãn, vốn rất biến động;
+thứ ba, PostgreSQL tích hợp tốt với Kubernetes qua \texttt{StatefulSet} và cung cấp công
+cụ phân tích kế hoạch truy vấn (\texttt{EXPLAIN ANALYZE}) phục vụ tối ưu hóa.
+
+Hình~\ref{fig:erd} trình bày sơ đồ thực thể -- quan hệ của lược đồ. Các thực thể trung
+tâm gồm \texttt{incidents} (sự cố, khóa theo nguồn và có các trường ngữ cảnh pod được
+làm giàu), \texttt{alerts} (cảnh báo do pipeline phát ra), \texttt{actions} (hành động
+phản hồi, ví dụ bản nháp \texttt{NetworkPolicy} và trạng thái phê duyệt) và
+\texttt{audit\_log} (nhật ký mọi thao tác phục vụ truy vết). Lược đồ được chuẩn hóa tới
+dạng chuẩn 3 để loại bỏ dư thừa và bảo đảm toàn vẹn tham chiếu qua các khóa ngoại từ
+cảnh báo và hành động trỏ về sự cố. Về chiến lược chỉ mục, các trường thời gian được
+đánh chỉ mục B-tree để hỗ trợ truy vấn theo khoảng và sắp xếp theo thời gian, trong khi
+các trường nhãn và chi tiết dạng \texttt{JSONB} dùng chỉ mục GIN; nhờ đó các truy vấn
+vận hành thường gặp --- liệt kê sự cố mới nhất, đếm theo mức độ, truy vết theo người
+dùng trong một khoảng thời gian --- đều thực thi hiệu quả. Định nghĩa bảng đầy đủ (DDL)
+được quản lý bằng các tệp di trú (\textit{migration}) nhúng kèm dịch vụ sự cố và được
+trích dẫn trong phần phụ lục.
+
+\begin{figure}[H]
+  \centering
+  \resizebox{0.95\linewidth}{!}{\input{../shared/figures/erd-soc}}
+  \caption{Sơ đồ thực thể -- quan hệ (ERD) của cơ sở dữ liệu SOC.}
+  \label{fig:erd}
+\end{figure}
+
+\section{Thiết kế quy trình phản hồi và giao diện vận hành}
+\label{ch:ui}
+
+Khác với nhiều công cụ tự động áp đặt chính sách, hệ thống của đồ án thiết kế vòng phản
+hồi theo cơ chế \emph{có người duyệt} (\textit{generate-for-review}) nhằm tránh rủi ro
+một cảnh báo sai dẫn tới việc cách ly nhầm dịch vụ hợp lệ. Hình~\ref{fig:bpmn} mô tả quy
+trình nghiệp vụ: khi một nguồn vượt ngưỡng, hệ thống tạo sự cố và sinh bản nháp
+\texttt{NetworkPolicy} cách ly; bản nháp này được trình cho người vận hành xem xét và
+chỉ được áp dụng vào cụm sau khi được phê duyệt, kèm ghi nhật ký kiểm toán đầy đủ. Thiết
+kế này đặt con người vào đúng điểm ra quyết định quan trọng, đồng thời vẫn giữ được tốc
+độ nhờ phần máy đã chuẩn bị sẵn mọi dữ kiện.
+
+\begin{figure}[H]
+  \centering
+  \resizebox{0.95\linewidth}{!}{\input{../shared/figures/bpmn-response}}
+  \caption{Quy trình nghiệp vụ phát hiện $\rightarrow$ phê duyệt $\rightarrow$ cách ly (BPMN).}
+  \label{fig:bpmn}
+\end{figure}
+
+Giao diện vận hành được thiết kế ở \emph{mức bố cục thành phần} (mockup) trong mục này;
+ảnh chụp ứng dụng chạy thật được trình bày ở Chương~\ref{ch:impl}. Giao diện phục vụ ba
+vai trò với quyền hạn tăng dần: \textit{Viewer} chỉ xem dashboard và sự cố,
+\textit{Editor} có thể ghi nhận (\textit{ack}) và đóng sự cố, còn \textit{Admin} được
+phê duyệt hành động phản hồi và quản trị hệ thống. Về mặt kiến trúc trình bày, hệ thống
+dùng hai bề mặt bổ trợ nhau: Grafana cung cấp các dashboard kỹ thuật chỉ-đọc cho đội
+trực vận hành, còn một console web kết xuất phía máy chủ phục vụ thao tác xử lý sự cố ---
+lựa chọn kết xuất phía máy chủ giúp giao diện đơn giản, ít mã JavaScript và dễ kiểm
+toán hơn so với một ứng dụng đơn trang.
+
+Về bố cục, console gồm \emph{ba màn hình chính}, kết xuất phía máy chủ (Flask/Jinja2)
+với cập nhật cục bộ bằng HTMX. Thanh tiêu đề ``ZT-SOC Admin Console'' và thanh điều hướng
+(\textit{Incidents}, \textit{Reports}) xuất hiện ở mọi trang. Các bản phác
+(\textit{wireframe}) dưới đây trình bày ở mức bố cục thành phần --- đúng theo mã nguồn của
+console --- chứ không phải giao diện chạy thật (ảnh chụp thật ở Chương~\ref{ch:impl}).
+
+Màn hình \textit{Incidents} (Hình~\ref{fig:wf-incidents}) gồm hai bảng: ``Pending actions''
+liệt kê các hành động phản hồi đang chờ duyệt với hai nút \emph{Approve}/\emph{Reject} ngay
+trên mỗi dòng (gửi bằng HTMX, cập nhật tại chỗ), và ``Incidents'' liệt kê các sự cố theo
+các cột mã, loại, địa chỉ nguồn, mức độ, trạng thái và thời điểm xuất hiện, kèm liên kết
+xem chi tiết.
+
+\begin{figure}[H]
+  \centering
+  \resizebox{0.86\linewidth}{!}{\input{../shared/figures/wf-incidents}}
+  \caption{Wireframe màn hình Incidents (bảng hành động chờ duyệt $+$ bảng sự cố).}
+  \label{fig:wf-incidents}
+\end{figure}
+
+Màn hình \textit{chi tiết sự cố} (Hình~\ref{fig:wf-detail}) là trung tâm thao tác: bảng
+siêu dữ liệu (địa chỉ nguồn, mức độ, trạng thái, các nút quan sát được, cờ liên-nút, số
+lần lặp, thời điểm đầu/cuối), bảng \emph{Actions} với nút duyệt, biểu mẫu \emph{Layer-2
+follow-up} để lên lịch thao tác pod (\texttt{delete\_pod}/\texttt{shutdown\_pod} kèm
+namespace, tên pod, lý do), và \emph{nhật ký kiểm toán} nhúng ngay trong trang.
+
+\begin{figure}[H]
+  \centering
+  \resizebox{0.9\linewidth}{!}{\input{../shared/figures/wf-incident-detail}}
+  \caption{Wireframe màn hình chi tiết sự cố.}
+  \label{fig:wf-detail}
+\end{figure}
+
+Màn hình \textit{Reports} (Hình~\ref{fig:wf-reports}) tổng hợp báo cáo theo tuần: số sự cố,
+trung vị thời gian phản hồi (MTTR), số sự kiện kiểm toán; phân tích theo mức độ, nguồn tấn
+công nhiều nhất và loại hành động; cuối trang là biểu mẫu xuất nhật ký kiểm toán phục vụ
+tuân thủ (định dạng CSV/JSON).
+
+\begin{figure}[H]
+  \centering
+  \resizebox{0.86\linewidth}{!}{\input{../shared/figures/wf-reports}}
+  \caption{Wireframe màn hình Reports (báo cáo tuần $+$ xuất nhật ký kiểm toán).}
+  \label{fig:wf-reports}
+\end{figure}
+
+\section{Kết luận chương}
+
+Chương này đã chuyển các yêu cầu và bài toán nêu ở Chương~\ref{ch:overview} thành một
+thiết kế hệ thống cụ thể. Bắt đầu từ phân tích yêu cầu và mô hình mối đe dọa, chương đã
+trình bày sơ đồ use-case cùng sơ đồ phân rã chức năng, rồi đặc tả kiến trúc phần mềm qua
+sơ đồ mức container và các sơ đồ luồng dữ liệu, làm rõ vai trò của từng dịch vụ và đường
+đi của dữ liệu trong hệ thống. Phần thiết kế cơ sở dữ liệu xác định các thực thể và quan
+hệ phục vụ lưu vết sự cố, cảnh báo, hành động và nhật ký kiểm toán. Cuối cùng, chương đặc
+tả quy trình phản hồi có người duyệt và thiết kế giao diện vận hành ở mức bố cục thành
+phần. Toàn bộ thiết kế này là bản vẽ trực tiếp cho phần cài đặt và triển khai ở
+Chương~\ref{ch:impl}.

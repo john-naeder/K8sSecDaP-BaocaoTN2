@@ -1,0 +1,23 @@
+% Sequence: phe duyet + ap hanh dong phan hoi. Chuong 3.
+\begin{tikzpicture}[font=\footnotesize, >={Stealth[length=2mm]},
+    ll/.style ={draw, rounded corners=2pt, fill=blue!8, align=center,
+                minimum height=0.72cm, minimum width=2.0cm},
+    msg/.style={-{Stealth[length=2mm]}, thick},
+    ret/.style={-{Stealth[length=2mm]}, thick, dashed},
+  ]
+  \def\yb{-6.4}
+  \node[ll] (a) at (0,0)    {Admin};
+  \node[ll] (b) at (2.8,0)  {web-console};
+  \node[ll] (c) at (6.0,0)  {incident-service};
+  \node[ll] (d) at (9.6,0)  {K8s API};
+  \node[ll] (e) at (12.4,0) {PostgreSQL};
+  \foreach \n in {a,b,c,d,e}{ \draw[dashed, gray!60] (\n.south) -- ++(0,\yb); }
+
+  \draw[msg] (0,-1.3)   -- node[above]{Phê duyệt (kèm lý do)} (2.8,-1.3);
+  \draw[msg] (2.8,-2.0) -- node[above]{yêu cầu áp hành động} (6.0,-2.0);
+  \draw[msg] (6.0,-2.7) -- node[above]{áp \texttt{NetworkPolicy} egress-deny} (9.6,-2.7);
+  \draw[ret] (9.6,-3.4) -- node[above]{kết quả áp} (6.0,-3.4);
+  \draw[msg] (6.0,-4.1) -- node[above]{cập nhật trạng thái $+$ ghi kiểm toán} (12.4,-4.1);
+  \draw[ret] (6.0,-4.8) -- node[above]{xác nhận} (2.8,-4.8);
+  \draw[ret] (2.8,-5.5) -- node[above]{hiển thị kết quả} (0,-5.5);
+\end{tikzpicture}

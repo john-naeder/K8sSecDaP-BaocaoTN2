@@ -1,0 +1,19 @@
+# Cấu hình tham chiếu cho portscan-pipeline.
+# Bản tinh giản từ stage-2 config/pipeline.yaml: chỉ giữ khối liên quan
+# đến frequency estimation + sliding window. Các khối graph (Tarjan,
+# BFS reachability, LPM Trie) cùng NATS/PostgreSQL/SOC handler thuộc
+# môn 2 và đã được loại bỏ ở phạm vi báo cáo này.
+#
+# portscan-pipeline hiện tại tiêu thụ tham số qua CLI flag thay vì
+# parse YAML — file này phục vụ tài liệu hoá và tham chiếu chéo từ
+# Chương 4 (Mục 4.3) trong báo cáo.
+
+frequency_estimator:
+  name: count_min_sketch          # count_min_sketch | misra_gries | hash_map_exact
+  params:
+    width: 2048                   # số cột (~ e/epsilon) — ảnh hưởng sai số
+    depth: 5                      # số hàng (~ ln(1/delta)) — ảnh hưởng độ tin cậy
+    threshold: 40                 # ngưỡng phát hiện (số kết nối / src_ip / cửa sổ)
+
+analysis:
+  window_seconds: 60              # tumbling window — reset estimator sau mỗi 60 giây

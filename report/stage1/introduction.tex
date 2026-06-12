@@ -1,0 +1,72 @@
+% ============================================================================
+% MO DAU
+% ============================================================================
+
+\chapter*{MỞ ĐẦU}
+\phantomsection
+\addcontentsline{toc}{chapter}{MỞ ĐẦU}
+
+\section*{Lý do chọn đề tài}
+
+% TODO: Viet noi dung
+
+Trong bối cảnh các hệ thống phân tán ngày càng phức tạp, đặc biệt là các cụm Kubernetes (K8s) triển khai hàng trăm đến hàng nghìn container, việc giám sát và phát hiện bất thường mạng trong thời gian thực trở thành thách thức lớn. Lưu lượng mạng sinh ra liên tục với tốc độ hàng triệu sự kiện mỗi giây, trong khi tài nguyên bộ nhớ trên mỗi nút giám sát bị giới hạn nghiêm ngặt.
+
+Bài toán cốt lõi ở đây thuộc lĩnh vực \textbf{cấu trúc dữ liệu và giải thuật}: làm thế nào để ước lượng tần suất xuất hiện của các phần tử (địa chỉ IP) trên một luồng dữ liệu liên tục, khi bộ nhớ khả dụng nhỏ hơn nhiều so với kích thước luồng? Đây chính là bài toán \textit{Stream Frequency Estimation} — một bài toán kinh điển trong lý thuyết streaming algorithms.
+
+Từ góc độ ứng dụng, lời giải cho bài toán này cho phép xây dựng hệ thống phát hiện port scanning, DDoS và các hành vi bất thường khác trên mạng K8s mà không gây quá tải bộ nhớ — ngay cả khi kẻ tấn công cố tình tạo ra lượng lớn địa chỉ IP giả mạo.
+
+\section*{Mục tiêu nghiên cứu}
+
+Báo cáo tập trung vào các mục tiêu sau:
+
+\begin{enumerate}
+    \item \textbf{Hình thức hóa bài toán:} Phát biểu chính xác bài toán ước lượng tần suất trên luồng dữ liệu dưới dạng toán học, bao gồm mô hình luồng, ràng buộc bộ nhớ, và yêu cầu $(\varepsilon, \delta)$-accuracy.
+
+    \item \textbf{Phân tích và so sánh giải thuật:} Nghiên cứu chi tiết ít nhất 3 phương án giải quyết (Exact Hash Map, Misra-Gries, Count-Min Sketch), so sánh về độ phức tạp thời gian, bộ nhớ và tính chất lỗi.
+
+    \item \textbf{Thiết kế và cài đặt:} Thiết kế hệ thống modular (Strategy Pattern) và cài đặt các giải thuật bằng C++17, kèm kiểm thử đơn vị.
+
+    \item \textbf{Minh họa từng bước:} Xây dựng chương trình xuất kết quả chạy giải thuật từng bước (step-by-step trace) dưới dạng dễ đọc, minh họa hoạt động nội tại của cấu trúc dữ liệu.
+
+    \item \textbf{Đánh giá thực nghiệm:} So sánh hiệu năng (throughput, bộ nhớ, độ chính xác) trên dữ liệu mô phỏng, đánh giá tính hiệu quả của giải pháp.
+
+    \item \textbf{Ứng dụng thực tế:} Tích hợp giải thuật vào pipeline phát hiện bất thường mạng trên Kubernetes, sử dụng eBPF để thu thập sự kiện.
+\end{enumerate}
+
+\section*{Phạm vi và giới hạn}
+
+\textbf{Phạm vi:}
+\begin{itemize}
+    \item Tập trung vào bài toán \textit{Stream Frequency Estimation} và cấu trúc dữ liệu Count-Min Sketch.
+    \item Cài đặt bằng C++17, kiểm thử bằng Google Test, benchmark bằng Google Benchmark.
+    \item Ứng dụng minh họa: phát hiện port scan trên mạng Kubernetes.
+\end{itemize}
+
+\textbf{Giới hạn:}
+\begin{itemize}
+    \item Ứng dụng phát hiện port-scan được hiện thực hoá ở dạng pipeline tinh giản (\texttt{tcpdump} $\rightarrow$ parser $\rightarrow$ frequency estimator $\rightarrow$ alert) ở Chương~\ref{ch:application}; tích hợp đầy đủ vào hệ Zero-Trust SOC (NATS, PostgreSQL, k8s NetworkPolicy, eBPF collector) là phạm vi của đồ án tốt nghiệp môn Công nghệ phần mềm 2.
+    \item Không đi sâu vào các bài toán phụ trên đồ thị (SCC detection, BFS k-hop reachability, LPM Trie classification) --- chỉ đề cập ở mục hướng phát triển ở Chương~\ref{ch:eval}.
+    \item Thực nghiệm trên dữ liệu mô phỏng có hạt giống cố định để bảo đảm khả năng tái lập; phần ghép nối với lưu lượng cụm K8s thực thuộc môn 2.
+\end{itemize}
+
+\section*{Phương pháp nghiên cứu}
+
+\begin{itemize}
+    \item \textbf{Nghiên cứu lý thuyết:} Phân tích bài báo gốc (Cormode \& Muthukrishnan, 2005; Misra \& Gries, 1982), chứng minh các đảm bảo toán học.
+    \item \textbf{Phương pháp thực nghiệm:} Cài đặt, kiểm thử đơn vị, benchmark so sánh giữa các phương án.
+    \item \textbf{Minh họa trực quan:} Lưu đồ giải thuật, bảng trace chạy từng bước, biểu đồ benchmark.
+    \item \textbf{Đánh giá:} So sánh lý thuyết và thực nghiệm, phân tích theo các kịch bản sử dụng thực tế.
+\end{itemize}
+
+\section*{Bố cục báo cáo}
+
+Báo cáo gồm 5 chương:
+
+\begin{itemize}
+    \item \textbf{Chương 1 --- Bài toán:} Bối cảnh, giả thiết, phát biểu hình thức bài toán ước lượng tần suất điểm và khảo sát công trình liên quan.
+    \item \textbf{Chương 2 --- Cơ sở lý thuyết:} Mô hình luồng dữ liệu, moment tần suất, yêu cầu $(\varepsilon, \delta)$-accuracy, tính chất hàm băm pairwise-independent và chứng minh định lý Cormode--Muthukrishnan.
+    \item \textbf{Chương 3 --- Phân tích và so sánh giải thuật:} Bốn phương án (Hash Map, Misra-Gries, Count-Min Sketch, Count Sketch), mỗi phương án kèm pseudocode, chứng minh, minh hoạ chạy tay; bảng so sánh tổng hợp và kết luận chọn CMS với Conservative Update.
+    \item \textbf{Chương 4 --- Thiết kế và cài đặt:} Kiến trúc \texttt{libdsa} với Strategy Pattern và Registry, cài đặt Count-Min Sketch trong C++17, kiểm thử đơn vị và chương trình trace từng bước.
+    \item \textbf{Chương 5 --- Ứng dụng và đánh giá:} Mô hình mối đe dọa port-scan, pipeline tinh giản \texttt{tcpdump} $\rightarrow$ parser $\rightarrow$ frequency estimator $\rightarrow$ alert, trace từng bước trên luồng IP tổng hợp; sau đó benchmark thông lượng/bộ nhớ trên cả luồng tổng hợp lẫn luồng IP, đối chiếu năm tiêu chí ở Chương~1, kết luận và hướng phát triển sang đồ án tốt nghiệp.
+\end{itemize}

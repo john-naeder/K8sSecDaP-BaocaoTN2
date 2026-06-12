@@ -1,0 +1,42 @@
+% Kien truc vi dich vu tren Kubernetes (cloud-native) + mo rong ngang + quan sat eBPF. Chuong 2.
+\begin{tikzpicture}[font=\footnotesize, >={Stealth[length=2.2mm]},
+    node distance=0.6cm and 0.9cm,
+    cli/.style ={draw, rounded corners=2pt, fill=blue!8, align=center, minimum height=0.7cm},
+    ing/.style ={draw, fill=red!12, align=center, minimum width=1.6cm, minimum height=1.3cm},
+    pod/.style ={draw, rounded corners=2pt, fill=orange!16, align=center,
+                 minimum width=1.5cm, minimum height=0.72cm},
+    dbp/.style ={draw, rounded corners=2pt, fill=green!14, align=center,
+                 minimum width=1.5cm, minimum height=0.72cm},
+    col/.style ={draw, rounded corners=2pt, fill=red!10, align=center,
+                 minimum width=3.6cm, minimum height=0.55cm, font=\scriptsize},
+    zone/.style={draw, dashed, rounded corners=3pt},
+  ]
+  \node[cli] (cli) {Người dùng\\(Internet)};
+  \node[ing, right=of cli] (ing) {Ingress /\\Cân bằng tải\\(Bắc--Nam)};
+  % Node 1
+  \node[pod, right=2.0cm of ing, yshift=1.7cm] (a) {svc A};
+  \node[pod, right=0.7cm of a] (b) {svc B};
+  \node[col, below=0.3cm of a, xshift=0.8cm] (c1) {collector eBPF (DaemonSet)};
+  \node[zone, fit=(a)(b)(c1), inner sep=7pt, label={[font=\scriptsize\bfseries]above:Node 1}] (n1) {};
+  % Node 2
+  \node[pod, below=1.7cm of a] (c) {svc C};
+  \node[dbp, right=0.7cm of c] (d) {CSDL};
+  \node[col, below=0.3cm of c, xshift=0.8cm] (c2) {collector eBPF (DaemonSet)};
+  \node[zone, fit=(c)(d)(c2), inner sep=7pt, label={[font=\scriptsize\bfseries]below:Node 2}] (n2) {};
+  % Cum K8s (khung ngoai, khong to nen)
+  \node[draw, thick, rounded corners=4pt, fit=(n1)(n2), inner sep=12pt,
+        label={[font=\bfseries]above:Cụm Kubernetes (mạng overlay phẳng)}] (cluster) {};
+  % Bac-Nam
+  \draw[->] (cli) -- (ing);
+  \draw[->] (ing.east) -- (a.west);
+  % Dong-Tay (qua mang overlay)
+  \draw[<->, purple!70, line width=0.9pt] (a) -- (b);
+  \draw[<->, purple!70, line width=0.9pt] (b.south) to[bend left=15] (d.north);
+  \draw[<->, purple!70, line width=0.9pt] (c) -- (d);
+  \draw[<->, purple!70, line width=0.9pt] (a.south) to[bend right=12] (c.north);
+  \node[purple!70, font=\scriptsize, align=center] at ($(cluster.east)+(1.55,0.55)$)
+    {lưu lượng\\\textbf{Đông--Tây}\\(qua mạng)};
+  % Mo rong ngang
+  \draw[->, blue!60, line width=1pt] ($(cluster.east)+(0.4,-0.4)$) -- ++(0,-2.0)
+    node[midway, right, align=left, font=\scriptsize] {Mở rộng\\\textbf{theo chiều ngang}:\\nhân bản pod /\\thêm node};
+\end{tikzpicture}

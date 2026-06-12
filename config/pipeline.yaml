@@ -1,0 +1,116 @@
+# Zero-Trust Network Mapper — Pipeline Configuration
+# Swap algorithms by changing the 'name' field.
+# Available implementations are listed in comments.
+
+# ─── Algorithm Selection ────────────────────────────────────────────────────
+
+algorithms:
+  # Frequency estimation for port scan detection
+  # Available: "count_min_sketch", "hash_map_exact"
+  frequency_estimator:
+    name: "count_min_sketch"
+    params:
+      width: 2048        # Number of counters per row (higher = less collision)
+      depth: 5           # Number of hash functions (higher = more accurate)
+      threshold: 40      # Alert if estimated frequency exceeds this
+
+  # Strongly Connected Component detection for architecture violations
+  # Available: "tarjan", "kosaraju"
+  scc_detector:
+    name: "tarjan"
+
+  # K-hop reachability for blast radius analysis
+  # Available: "bfs", "dijkstra"
+  reachability:
+    name: "bfs"
+    params:
+      max_hops: 3        # Maximum distance from compromised node
+
+  # IP classification via Longest Prefix Match
+  # Available: "lpm_trie"
+  ip_classifier:
+    name: "lpm_trie"
+
+# ─── Network Classification (CIDR → label) ─────────────────────────────────
+
+networks:
+  - cidr: "10.244.0.0/16"
+    label: 1
+    name: "pod_network"
+
+  - cidr: "10.96.0.0/12"
+    label: 2
+    name: "service_network"
+
+  - cidr: "192.168.0.0/16"
+    label: 3
+    name: "node_network"
+
+  - cidr: "172.16.0.0/12"
+    label: 4
+    name: "private_rfc1918"
+
+  - cidr: "0.0.0.0/0"
+    label: 0
+    name: "external"
+
+# ─── Event Source ───────────────────────────────────────────────────────────
+
+event_source:
+  # "ebpf"  — read from eBPF collector (stdin pipe or ring buffer)
+  # "file"  — read JSON lines from a file (for testing without eBPF)
+  type: "file"
+  path: "/tmp/events.json"    # Only used when type = "file"
+
+# ─── Analysis Settings ─────────────────────────────────────────────────────
+
+analysis:
+  # Sliding window for CMS: reset counters every N seconds
+  window_seconds: 60
+
+  # How often to run SCC detection on the accumulated graph
+  scc_interval_seconds: 10
+
+  # How often to snapshot the graph for visualization
+  snapshot_interval_seconds: 5
+
+# ─── Output ─────────────────────────────────────────────────────────────────
+
+output:
+  alerts_file: "output/alerts.json"
+  graph_file: "output/graph.json"
+  stats_file: "output/stats.json"
+
+# ─── SOC: Alert Handlers (Phase 6) ─────────────────────────────────────────
+# Fan-out: every alert is sent to every handler in order. Failure in one
+# handler does not stop others.
+#
+# Available handlers: file, stdout, stderr, nats
+# If alert_handlers is absent, the pipeline falls back to a single "file"
+# handler pointing at output.alerts_file (legacy behavior).
+
+alert_handlers:
+  - name: "file"
+    params:
+      path: "output/alerts.json"
+  - name: "stderr"          # container logs -> Loki via Promtail
+  # - name: "nats"          # enable in-cluster aggregator
+  #   params:
+  #     url: "nats://nats.soc.svc.cluster.local:4222"
+  #     subject: "zt.alerts.raw"
+
+# Per-type severity overrides. Defaults: port_scan=medium, blast_radius=high,
+# scc_anomaly=high. Allowed values: low | medium | high | critical.
+severity_rules:
+  - type: "port_scan"
+    severity: "medium"
+  - type: "blast_radius"
+    severity: "high"
+  - type: "scc_anomaly"
+    severity: "high"
+
+# Pod/node identity — populated by the Downward API in the DaemonSet.
+# Falls back to $NODE_NAME / $POD_NAMESPACE env vars when left empty.
+soc:
+  node_name: ""
+  namespace: ""

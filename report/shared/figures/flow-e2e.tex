@@ -1,0 +1,27 @@
+% Luu do kich ban end-to-end: attacker -> phat hien -> su co -> cach ly -> xac minh. Chuong 4.
+\begin{tikzpicture}[font=\footnotesize, >={Stealth[length=2.4mm]}, node distance=0.6cm,
+    comp/.style={draw, rounded corners=2pt, align=center, minimum width=6.6cm,
+                 minimum height=0.78cm},
+    atk/.style ={comp, fill=red!14},
+    kern/.style={comp, fill=green!12},
+    proc/.style={comp, fill=blue!10},
+    soc/.style ={comp, fill=orange!14},
+    hum/.style ={comp, fill=violet!12},
+    flow/.style={->, very thick},
+    lbl/.style ={font=\scriptsize\itshape, fill=white, inner sep=1pt},
+  ]
+  \node[atk]  (atk)    {Pod tấn công --- quét cổng \texttt{nmap -sT}};
+  \node[kern, below=of atk]    (col) {\texttt{collector-ebpf} (DaemonSet): kprobe \texttt{tcp\_v4\_connect},\\lọc LPM (chỉ mạng pod), đẩy qua ring buffer};
+  \node[proc, below=of col]    (pipe){\texttt{pipeline}: CMS \texttt{record(src\_ip)}; vượt ngưỡng $40$/$60$s};
+  \node[soc,  below=of pipe]   (inc) {\texttt{incident-service}: tạo sự cố $+$ làm giàu \texttt{src\_ip}$\rightarrow$pod;\\sinh bản nháp \texttt{NetworkPolicy} egress-deny};
+  \node[hum,  below=of inc]    (con) {\texttt{web-console}: người vận hành xem xét \& \emph{phê duyệt}};
+  \node[proc, below=of con]    (k8s) {K8s API $+$ Calico: áp \texttt{NetworkPolicy} cách ly};
+  \node[kern, below=of k8s]    (ver) {Xác minh: pod tấn công mất egress; pod hợp lệ không ảnh hưởng};
+
+  \draw[flow] (atk)  -- node[lbl,right]{\texttt{connect()}} (col);
+  \draw[flow] (col)  -- node[lbl,right]{dòng JSON} (pipe);
+  \draw[flow] (pipe) -- node[lbl,right]{cảnh báo \texttt{port\_scan} (NATS)} (inc);
+  \draw[flow] (inc)  -- node[lbl,right]{bản nháp egress-deny} (con);
+  \draw[flow] (con)  -- node[lbl,right]{\texttt{apply} (sau phê duyệt)} (k8s);
+  \draw[flow] (k8s)  -- node[lbl,right]{thực thi ở tầng mạng} (ver);
+\end{tikzpicture}

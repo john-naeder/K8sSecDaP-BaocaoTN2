@@ -1,0 +1,67 @@
+# Daily pg_dump → MinIO. 02:00 UTC keeps the backup off business hours
+# of every reasonable timezone the report demos in. Retention is enforced
+# implicitly by 30-retention-cronjob.yaml which prunes objects older
+# than 30 daily snapshots.
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: postgres-backup
+  namespace: soc
+  labels:
+    app.kubernetes.io/name: postgres-backup
+    app.kubernetes.io/part-of: zero-trust-mapper
+spec:
+  schedule: "0 2 * * *"             # 02:00 UTC daily
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 5
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        spec:
+          restartPolicy: OnFailure
+          containers:
+            - name: backup
+              image: postgres:16-alpine
+              command:
+                - sh
+                - -c
+                - |
+                  set -euo pipefail
+                  apk add --no-cache curl ca-certificates >/dev/null
+                  curl -fsSLo /usr/local/bin/mc https://dl.min.io/client/mc/release/linux-amd64/mc
+                  chmod +x /usr/local/bin/mc
+                  TS="$(date -u +%Y%m%dT%H%M%SZ)"
+                  OUT="/tmp/soc-${TS}.dump"
+                  echo "[backup] pg_dump → $OUT"
+                  PGPASSWORD="$POSTGRES_PASSWORD" pg_dump \
+                      -h "$POSTGRES_HOST" -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
+                      -Fc -f "$OUT"
+                  echo "[backup] uploading to minio"
+                  mc alias set ms "http://$MINIO_ENDPOINT" "$MINIO_ACCESS_KEY" "$MINIO_SECRET_KEY"
+                  mc cp "$OUT" "ms/zt-postgres-backups/soc-${TS}.dump"
+                  echo "[backup] done"
+              env:
+                - { name: POSTGRES_HOST, value: "postgres.soc.svc.cluster.local" }
+                - name: POSTGRES_USER
+                  valueFrom: { secretKeyRef: { name: postgres-creds, key: POSTGRES_USER } }
+                - name: POSTGRES_PASSWORD
+                  valueFrom: { secretKeyRef: { name: postgres-creds, key: POSTGRES_PASSWORD } }
+                - name: POSTGRES_DB
+                  valueFrom: { secretKeyRef: { name: postgres-creds, key: POSTGRES_DB } }
+                - { name: MINIO_ENDPOINT,   value: "minio.soc.svc.cluster.local:9000" }
+                - name: MINIO_ACCESS_KEY
+                  valueFrom: { secretKeyRef: { name: minio-creds, key: MINIO_ROOT_USER } }
+                - name: MINIO_SECRET_KEY
+                  valueFrom: { secretKeyRef: { name: minio-creds, key: MINIO_ROOT_PASSWORD } }
+              resources:
+                requests: { cpu: 100m, memory: 128Mi }
+                limits:   { cpu: 500m, memory: 512Mi }
+              securityContext:
+                runAsNonRoot: true
+                runAsUser: 70             # postgres image's postgres user
+                allowPrivilegeEscalation: false
+                capabilities: { drop: ["ALL"] }
+                seccompProfile: { type: RuntimeDefault }
